@@ -3,7 +3,7 @@
  * vue d'avion) puis stylisé pour garder un rendu low-poly lisible.
  */
 import * as THREE from 'three';
-import { MeshBuilder, pointInPoly, type HeightGrid, type Poly, type RGB } from './geometry';
+import { MeshBuilder, pointInPoly, sampleGrid, type HeightGrid, type Poly, type RGB, type SegmentIndex } from './geometry';
 import { srgbToLinear } from '../render/engine';
 import type { RouteIndex } from '../geo/route';
 
@@ -40,6 +40,33 @@ export function flattenUnderRoute(g: HeightGrid, index: RouteIndex): void {
       if (diff > 6) continue; // pont : on laisse la vallée en dessous
       const t = near.dist <= inner ? 1 : 1 - smoothstep(inner, outer, near.dist);
       g.h[k] += diff * t;
+    }
+  }
+}
+
+/**
+ * Aplanit le terrain sous toutes les routes de la tuile : chaque sommet proche d'une
+ * chaussée prend l'altitude de l'axe de la route (relief d'origine), ce qui crée le
+ * petit replat de la chaussée dans les pentes. Les ponts ne sont pas dans l'index.
+ */
+export function flattenUnderRoads(g: HeightGrid, roads: SegmentIndex<{ halfW: number }>): void {
+  if (!roads.size) return;
+  const w = g.res + 1;
+  const step = g.size / g.res;
+  const orig: HeightGrid = { ...g, h: Float32Array.from(g.h) };
+  const inner = Math.max(1.5, step * 0.7);
+  const blend = 10;
+  for (let r = 0; r < w; r++) {
+    for (let c = 0; c < w; c++) {
+      const x = g.x0 + c * step, z = g.z0 + r * step;
+      const hit = roads.nearest(x, z, 7 + inner + blend, (d) => d.halfW);
+      if (!hit) continue;
+      const edge = hit.dist - hit.data.halfW;
+      if (edge > inner + blend) continue;
+      const k = r * w + c;
+      const target = sampleGrid(orig, hit.px, hit.pz) - 0.15;
+      const t = edge <= inner ? 1 : 1 - smoothstep(inner, inner + blend, edge);
+      g.h[k] += (target - g.h[k]) * t;
     }
   }
 }

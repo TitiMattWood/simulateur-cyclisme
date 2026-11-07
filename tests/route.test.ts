@@ -8,7 +8,7 @@ describe('GPX et parcours', () => {
     const gpx = parseGpx(readFileSync('public/routes/alpe-huez.gpx', 'utf8'));
     expect(gpx.points.length).toBeGreaterThan(100);
     const r = Route.fromPoints(gpx.name, gpx.points);
-    expect(r.length).toBeGreaterThan(12000);
+    expect(r.length).toBeGreaterThan(13300);
     expect(r.length).toBeLessThan(14500);
     // D+ de l'Alpe d'Huez d'après l'altitude du GPX : environ 1 000 à 1 150 m
     expect(r.totalAscent).toBeGreaterThan(950);

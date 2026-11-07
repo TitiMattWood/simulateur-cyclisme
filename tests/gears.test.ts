@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { simulationParams } from '../src/physics/trainerSim';
-import { VIRTUAL_GEARS, gearLabel, cadenceFor, realRatio } from '../src/physics/gears';
+import { GearBox, cadenceFor, virtualFactor, TRAINER_CIRCUMFERENCE } from '../src/physics/gears';
 
 const G = 9.80665;
 /** Modèle de force d'un trainer en mode SIM (masse m). */
@@ -24,11 +24,51 @@ describe('vitesses virtuelles', () => {
     }
   });
 
-  it('24 rapports croissants, de ≈ 34×47 à ≈ 52×11', () => {
-    expect(VIRTUAL_GEARS).toHaveLength(24);
-    for (let i = 1; i < 24; i++) expect(VIRTUAL_GEARS[i]).toBeGreaterThan(VIRTUAL_GEARS[i - 1]);
-    expect(VIRTUAL_GEARS[23]).toBeCloseTo(4.73, 2);
-    expect(gearLabel(50 / 17)).toBe('≈ 50×17');
-    expect(cadenceFor(10, realRatio(50, 17))).toBeCloseTo(96.9, 0);
+  it('double plateau séquentiel : rapports croissants, sans croisement extrême', () => {
+    const box = new GearBox({ chainrings: '50/34', cassette: '11-30 (12 v)', tire: '700x25', sequential: true });
+    box.shift(-100);
+    expect(box.ring).toBe(34);
+    expect(box.cog).toBe(30);
+    let prev = box.ratio;
+    for (let i = 0; i < 40; i++) {
+      box.shift(1);
+      expect(box.ratio).toBeGreaterThanOrEqual(prev);
+      prev = box.ratio;
+    }
+    expect(box.ring).toBe(50);
+    expect(box.cog).toBe(11);
+    expect(box.label).toMatch(/^50×11 · 9,57 m · \d+\/\d+$/);
+  });
+
+  it('monoplateau et double non séquentiel : la cassette seule, puis le plateau à part', () => {
+    const mono = new GearBox({ chainrings: '42', cassette: '10-44 (12 v)', tire: '700x40', sequential: true });
+    mono.shift(-100);
+    expect(mono.cog).toBe(44);
+    mono.shiftFront(); // sans effet en monoplateau
+    expect(mono.ring).toBe(42);
+    const dbl = new GearBox({ chainrings: '50/34', cassette: '11-28 (11 v)', tire: '700x25', sequential: false });
+    const before = dbl.ring;
+    dbl.shiftFront();
+    expect(dbl.ring).not.toBe(before);
+  });
+
+  it("le facteur k compare les développements virtuel et réel", () => {
+    const box = new GearBox({ chainrings: '50/34', cassette: '11-30 (12 v)', tire: '700x25', sequential: false });
+    while (box.ring !== 50) box.shiftFront();
+    while (box.cog !== 17) box.shift(box.cog > 17 ? 1 : -1);
+    // même braquet que le réel (50×17) et même circonférence que le trainer → k = 1
+    expect(virtualFactor(box, 50, 17)).toBeCloseTo(2.105 / TRAINER_CIRCUMFERENCE, 6);
+    expect(cadenceFor(10, box.development)).toBeCloseTo(96.9, 0);
+  });
+});
+
+describe('plateaux proposés', () => {
+  it('monoplateau de 38 à 50 dents, en plus des doubles', async () => {
+    const { CHAINRINGS } = await import('../src/physics/gears');
+    const mono = Object.values(CHAINRINGS).filter((r) => r.length === 1).map((r) => r[0]);
+    expect(mono).toEqual([38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
+    expect(CHAINRINGS['50/34']).toEqual([50, 34]);
+    const box = new GearBox({ chainrings: '50', cassette: '11-34 (12 v)', tire: '700x28', sequential: true });
+    expect(box.ring).toBe(50);
   });
 });

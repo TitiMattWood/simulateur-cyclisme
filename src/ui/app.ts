@@ -11,7 +11,7 @@ import { FtmsTrainer } from '../devices/sensors';
 import { loadSave, writeSave, exportBackup, importBackup, type SaveData, type Profile } from '../storage/store';
 import { parseGpx } from '../geo/gpx';
 import { Route } from '../geo/route';
-import { RideView } from '../ride/rideView';
+import { RideView, type RideSource } from '../ride/rideView';
 import type { RideSummary, Sample } from '../ride/recorder';
 import { encodeFit } from '../export/fit';
 import { encodeGpx } from '../export/gpx';
@@ -20,11 +20,13 @@ import { levelFromXp } from '../ride/metrics';
 import { buildParams } from '../physics/model';
 import { CAM_MODES } from '../render/cameras';
 import { ROUTES, type RouteEntry, type WorldId } from '../data/routes';
+import { START_POINTS } from '../data/startPoints';
 import franceMap from '../data/france-map.json';
 import { APP_NAME, QUALITY, type QualityLevel } from '../config';
 import { t, setLang, type I18nKey, type Lang } from '../i18n';
 import { escapeHtml, fmtKm, fmtNum, fmtTime } from './format';
 import type { FrameId, WheelId } from '../physics/equipment';
+import { CHAINRINGS, CASSETTES, TIRES, type TireId } from '../physics/gears';
 
 type Tab = 'ride' | 'devices' | 'profile' | 'history';
 
@@ -34,6 +36,13 @@ interface Selection {
   distance: number;
   ascent: number;
   entry?: RouteEntry;
+}
+
+/** Départ du trajet libre choisi (point proposé ou adresse recherchée). */
+interface FreeStart {
+  name: string;
+  lat: number;
+  lon: number;
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(root: ParentNode, sel: string) => root.querySelector(sel) as T;
@@ -46,6 +55,8 @@ export class App {
   private ui: HTMLElement;
   private tab: Tab = 'ride';
   private selection: Selection | null = null;
+  private freeStart: FreeStart | null = null;
+  private searchResults: FreeStart[] = [];
   private ride: RideView | null = null;
   private message = '';
 
@@ -143,7 +154,13 @@ export class App {
           return `<g class="marker ${sel?.entry?.id === r.id ? 'sel' : ''}" data-route="${r.id}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><circle r="13"/><circle r="5" class="dot"/></g>`;
         }).join('')}
       </svg>
-      <p class="hint">${t('ride.mapsSoon')}</p>
+      <h3>${t('free.title')}</h3>
+      <p class="hint">${t('free.hint')}</p>
+      ${[...worlds, 'paris' as const].map((w) => `<div class="starts"><b>${t(`world.${w}` as I18nKey)}</b>${START_POINTS.filter((s) => s.world === w).map((s) => `<button data-start="${s.id}" class="chip ${this.freeStart?.name === s.name ? 'sel' : ''}">${escapeHtml(s.name)}</button>`).join('')}</div>`).join('')}
+      <form class="search" id="free-search"><input type="search" id="free-q" placeholder="${t('free.search')}" autocomplete="off"><button type="submit">${t('free.go')}</button></form>
+      ${this.searchResults.length ? `<div class="starts">${this.searchResults.map((r, i) => `<button data-res="${i}" class="chip ${this.freeStart?.name === r.name ? 'sel' : ''}">${escapeHtml(r.name)}</button>`).join('')}</div>` : ''}
+      ${this.freeStart ? `<button class="primary big" id="free-start">${t('free.start', { name: this.freeStart.name })}</button>` : ''}
+      <h3>${t('ride.routes')}</h3>
       ${worlds.map((w) => `
         <h3>${t(`world.${w}` as I18nKey)}</h3>
         <ul class="routes">${ROUTES.filter((r) => r.world === w).map((r) => `
@@ -162,6 +179,30 @@ export class App {
   }
 
   private bindRideTab(): void {
+    this.ui.querySelectorAll<HTMLElement>('[data-start]').forEach((el) =>
+      el.addEventListener('click', () => {
+        const s = START_POINTS.find((p) => p.id === el.dataset.start);
+        if (s) this.freeStart = { name: s.name, lat: s.lat, lon: s.lon };
+        this.renderHome();
+      }),
+    );
+    this.ui.querySelectorAll<HTMLElement>('[data-res]').forEach((el) =>
+      el.addEventListener('click', () => {
+        this.freeStart = this.searchResults[Number(el.dataset.res)] ?? null;
+        this.renderHome();
+      }),
+    );
+    $<HTMLFormElement>(this.ui, '#free-search')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const q = $<HTMLInputElement>(this.ui, '#free-q').value.trim();
+      if (q.length < 3) return;
+      this.searchResults = await searchPlaces(q).catch(() => []);
+      this.message = this.searchResults.length ? '' : t('free.notFound');
+      this.renderHome();
+    });
+    $(this.ui, '#free-start')?.addEventListener('click', () => {
+      if (this.freeStart) this.startRide({ kind: 'open', ...this.freeStart });
+    });
     this.ui.querySelectorAll<HTMLElement>('[data-route]').forEach((el) =>
       el.addEventListener('click', () => this.selectDemo(el.dataset.route!)),
     );
@@ -171,7 +212,12 @@ export class App {
       const text = await file.text();
       this.selectGpx(text, file.name.replace(/\.gpx$/i, ''));
     });
-    $(this.ui, '#start')?.addEventListener('click', () => this.startRide());
+    $(this.ui, '#start')?.addEventListener('click', () => {
+      const sel = this.selection;
+      if (!sel) return;
+      const gpx = parseGpx(sel.gpx, sel.name);
+      this.startRide({ kind: 'gpx', route: Route.fromPoints(sel.name, gpx.points) });
+    });
   }
 
   private async selectDemo(id: string): Promise<void> {
@@ -290,14 +336,23 @@ export class App {
         <fieldset><legend>${t('pf.shifting')}</legend>
           <label class="check"><input type="radio" name="pf-shift" value="virtual" ${p.shifting === 'virtual' ? 'checked' : ''}> ${t('pf.shift.virtual')}</label>
           <label class="check"><input type="radio" name="pf-shift" value="manual" ${p.shifting === 'manual' ? 'checked' : ''}> ${t('pf.shift.manual')}</label>
+          <h4 class="sub">${t('pf.realSetup')}</h4>
           <div class="grid2">
             ${num('pf-ring', 'pf.chainring', p.chainring, 20, 60)}
             ${num('pf-cog', 'pf.cog', p.cogTeeth, 10, 36)}
           </div>
           <p class="hint">${t('pf.cogHint')}</p>
-          <div class="grid2">
+          <h4 class="sub">${t('pf.virtualSetup')}</h4>
+          <div class="grid3">
+            <label>${t('pf.rings')}<select id="pf-rings">${Object.keys(CHAINRINGS).map((k) => `<option value="${k}" ${k === p.drivetrain.chainrings ? 'selected' : ''}>${CHAINRINGS[k].length > 1 ? `${k} (${t('pf.double')})` : `${k} (${t('pf.single')})`}</option>`).join('')}</select></label>
+            <label>${t('pf.cassette')}<select id="pf-cassette">${Object.keys(CASSETTES).map((k) => `<option value="${k}" ${k === p.drivetrain.cassette ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+            <label>${t('pf.tire')}<select id="pf-tire">${(Object.keys(TIRES) as TireId[]).map((k) => `<option value="${k}" ${k === p.drivetrain.tire ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+          </div>
+          <label class="check"><input type="checkbox" id="pf-seq" ${p.drivetrain.sequential ? 'checked' : ''}> ${t('pf.sequential')}</label>
+          <div class="grid3">
             <label>${t('pf.keyUp')}<input type="text" readonly class="keycap" id="pf-kup" value="${escapeHtml(p.keyGearUp)}"></label>
             <label>${t('pf.keyDown')}<input type="text" readonly class="keycap" id="pf-kdown" value="${escapeHtml(p.keyGearDown)}"></label>
+            <label>${t('pf.keyFront')}<input type="text" readonly class="keycap" id="pf-kfront" value="${escapeHtml(p.keyFront)}"></label>
           </div>
           <p class="hint">${t('pf.keyHint')}</p>
         </fieldset>
@@ -355,6 +410,8 @@ export class App {
         cogTeeth: Math.round(clamp(parseFloat(val('pf-cog')), 10, 36, p.cogTeeth)),
         keyGearUp: val('pf-kup') || 'PageUp',
         keyGearDown: val('pf-kdown') || 'PageDown',
+        keyFront: val('pf-kfront') || 'f',
+        drivetrain: { chainrings: val('pf-rings'), cassette: val('pf-cassette'), tire: val('pf-tire') as TireId, sequential: chk('pf-seq') },
         quality,
         lang,
         configured: true,
@@ -400,21 +457,18 @@ export class App {
   // -------------------------------------------------------------------------
   // Sortie
 
-  private async startRide(): Promise<void> {
-    const sel = this.selection;
-    if (!sel) return;
-    const gpx = parseGpx(sel.gpx, sel.name);
-    const route = Route.fromPoints(sel.name, gpx.points);
+  private async startRide(source: RideSource): Promise<void> {
+    const title = source.kind === 'gpx' ? source.route.name : source.name;
     this.ui.innerHTML = `
       <div class="loading">
-        <h2>${escapeHtml(sel.name)}</h2>
+        <h2>${escapeHtml(title)}</h2>
         <p>${t('load.title')}</p>
         <div class="progress"><div id="prog"></div></div>
         <small id="prog-step"></small>
       </div>
       <div id="ride-overlay"></div>`;
     const overlay = $(this.ui, '#ride-overlay');
-    const ride = new RideView(route, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
+    const ride = new RideView(source, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
       onPauseMenu: () => this.showPause(),
       onFinish: (summary, samples) => this.showReport(summary, samples),
     });
@@ -445,7 +499,9 @@ export class App {
     bar.innerHTML = `
       <button data-act="cam">🎥 ${t('touch.cam')}</button>
       ${this.profile.shifting === 'virtual' ? `<button data-act="gdown" title="${t('touch.gearDown')}">⚙ −</button><button data-act="gup" title="${t('touch.gearUp')}">⚙ +</button>` : ''}
+      ${this.profile.shifting === 'virtual' && CHAINRINGS[this.profile.drivetrain.chainrings]?.length > 1 && !this.profile.drivetrain.sequential ? `<button data-act="gfront">⚙ ${t('touch.front')}</button>` : ''}
       ${this.devices.hasPowerSource ? '' : `<button data-act="down">− W</button><button data-act="up">+ W</button>`}
+      ${this.ride?.isOpen ? `<button data-act="left">◀</button><button data-act="uturn">↩ ${t('touch.uturn')}</button><button data-act="right">▶</button>` : ''}
       <button data-act="pause">⏸ ${t('touch.pause')}</button>`;
     overlay.appendChild(bar);
     bar.addEventListener('click', (e) => {
@@ -454,6 +510,10 @@ export class App {
       if (act === 'cam') this.ride.rig.next();
       if (act === 'gup') this.ride.shift(1);
       if (act === 'gdown') this.ride.shift(-1);
+      if (act === 'gfront') this.ride.shiftFront();
+      if (act === 'left') this.ride.turn(-1);
+      if (act === 'right') this.ride.turn(1);
+      if (act === 'uturn') this.ride.uTurn();
       if (act === 'up') this.devices.demoPower = Math.min(1500, this.devices.demoPower + 10);
       if (act === 'down') this.devices.demoPower = Math.max(0, this.devices.demoPower - 10);
       if (act === 'pause') { this.ride.pause(); this.showPause(); }
@@ -567,4 +627,12 @@ export class App {
     if (!this.save.history.length) this.tab = 'ride';
     this.renderHome();
   }
+}
+
+/** Recherche d'une adresse ou d'un lieu en France (service de géocodage de l'IGN). */
+async function searchPlaces(q: string): Promise<FreeStart[]> {
+  const url = `https://data.geopf.fr/geocodage/search?${new URLSearchParams({ q, limit: '6' })}`;
+  const res = await fetch(url);
+  const json = (await res.json()) as { features?: Array<{ geometry: { coordinates: [number, number] }; properties: { label?: string } }> };
+  return (json.features ?? []).map((f) => ({ name: f.properties.label ?? q, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }));
 }

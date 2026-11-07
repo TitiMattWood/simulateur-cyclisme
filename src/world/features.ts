@@ -10,8 +10,10 @@ import {
 import { hexLinear } from '../render/engine';
 import type { GeoFeature } from '../geo/ign';
 import type { LocalProjection } from '../geo/projection';
-import type { RouteIndex } from '../geo/route';
-import { ROAD_HALF_WIDTH } from './terrain';
+import { ROAD_CLASSES, roadWidth, roadColor } from './roads';
+
+/** Fonction « ce point est-il à éviter ? » (chaussée, parcours…). */
+export type Avoid = (x: number, z: number) => boolean;
 
 interface TileBounds {
   x0: number;
@@ -34,6 +36,9 @@ const PALETTES: Record<string, { walls: string[]; flat: string; pitched: string[
   'Sportif': { walls: ['#d6dde3', '#e3e7ea'], flat: '#8f979e', pitched: ['#7a838c'] },
   'Annexe': { walls: ['#d3c9b6', '#c9bfa9'], flat: '#8a8a86', pitched: ['#9a5440'] },
 };
+
+/** Tuiles vernissées bourguignonnes (jaune, vert, rouge, noir). */
+const GLAZED = ['#c9a227', '#2f6b3a', '#8e2a1c', '#1f2428'].map((c) => hexLinear(c));
 
 function pick<T>(arr: T[], r: number): T {
   return arr[Math.floor(r * arr.length) % arr.length];
@@ -61,7 +66,9 @@ export function buildBuildings(
     let h = Number(props.hauteur);
     if (!(h > 0)) h = Number(props.nombre_d_etages) > 0 ? Number(props.nombre_d_etages) * 3 + 1 : 6;
     h = Math.min(250, Math.max(2.5, h));
-    const pal = PALETTES[usage] ?? PALETTES['Résidentiel'];
+    // tours, donjons, châteaux et monuments : pierre de taille
+    const stone = /Tour|donjon|Château|Fort|Monument|Arc/.test(nature);
+    const pal = stone ? PALETTES['Religieux'] : PALETTES[usage] ?? PALETTES['Résidentiel'];
     const r = rng(hashString(f.id));
     const wall = hexLinear(pick(pal.walls, r()));
     // Base : point le plus bas du sol sous l'emprise, enfoncé pour ne pas flotter en pente.
@@ -109,9 +116,11 @@ export function buildBuildings(
       }
       if (church && area > 80) {
         const spire = eaves + Math.min(30, h * 0.9);
+        // En Bourgogne, les églises portent des toits de tuiles vernissées multicolores.
+        const burgundy = proj.lat0 > 46.6 && proj.lat0 < 48 && proj.lon0 > 4 && proj.lon0 < 5.6;
         for (let i = 0; i < ring.length; i++) {
           const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
-          mb.tri(ax, eaves, az, bx, eaves, bz, cx, spire, cz, roof);
+          mb.tri(ax, eaves, az, bx, eaves, bz, cx, spire, cz, burgundy ? GLAZED[i % GLAZED.length] : roof);
         }
       }
     }
@@ -194,7 +203,7 @@ const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 /** Place les arbres dans les zones de végétation de la tuile (instanciation : 1 appel GPU par espèce). */
 export function buildVegetation(
   feats: GeoFeature[], proj: LocalProjection, grid: HeightGrid, bounds: TileBounds,
-  route: RouteIndex | null, maxTrees: number, seed: number,
+  avoid: Avoid | null, maxTrees: number, seed: number,
 ): THREE.Group | null {
   const zones: Array<{ poly: Poly; rule: VegRule }> = [];
   let estimate = 0;
@@ -227,7 +236,7 @@ export function buildVegetation(
         if (count >= maxTrees) break;
         const px = x + (r() - 0.5) * sp * 0.8, pz = z + (r() - 0.5) * sp * 0.8;
         if (!pointInPoly(px, pz, poly)) continue;
-        if (route && route.nearest(px, pz, ROAD_HALF_WIDTH + 4)) continue; // pas d'arbre sur la route
+        if (avoid && avoid(px, pz)) continue; // pas d'arbre sur la chaussée
         const kind: TreeKind = rule.kind === 'mixed' ? (r() < 0.5 ? 'leaf' : 'conifer') : rule.kind;
         const sc = rule.scale * (0.75 + r() * 0.6);
         q.setFromAxisAngle(yAxis, r() * Math.PI * 2);
@@ -258,20 +267,9 @@ export function buildVegetation(
 // ---------------------------------------------------------------------------
 // Routes et voies ferrées
 
-const ROAD_STYLE: Record<string, { w: number; color: string }> = {
-  'Type autoroutier': { w: 22, color: '#4d5055' },
-  'Route à 2 chaussées': { w: 13, color: '#55585d' },
-  'Route à 1 chaussée': { w: 5.5, color: '#5b5e63' },
-  'Bretelle': { w: 5, color: '#55585d' },
-  'Rond-point': { w: 7, color: '#5b5e63' },
-  'Route empierrée': { w: 3.5, color: '#a9967a' },
-  'Chemin': { w: 3, color: '#b9a27c' },
-  'Piste cyclable': { w: 2.5, color: '#8c5e52' },
-};
-
 export function buildRoads(
   roads: GeoFeature[], rails: GeoFeature[], proj: LocalProjection, grid: HeightGrid,
-  bounds: TileBounds, route: RouteIndex | null,
+  bounds: TileBounds, skip: Avoid | null,
 ): THREE.BufferGeometry | null {
   const mb = new MeshBuilder();
   const up: [number, number, number] = [0, 1, 0];
@@ -291,7 +289,7 @@ export function buildRoads(
         const x1 = ax + (bx - ax) * t1, z1 = az + (bz - az) * t1;
         const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
         if (!inTile(bounds, mx, mz)) continue;
-        if (skipRoute && route && route.nearest(mx, mz, ROAD_HALF_WIDTH + 1.5)) continue; // déjà dessinée par le parcours
+        if (skipRoute && skip && skip(mx, mz)) continue; // déjà dessinée par le parcours GPX
         const y0 = (ownZ ? ah + (bh - ah) * t0 : sampleGrid(grid, x0, z0)) + lift;
         const y1 = (ownZ ? ah + (bh - ah) * t1 : sampleGrid(grid, x1, z1)) + lift;
         mb.quad([x0 + nx, y0, z0 + nz], [x0 - nx, y0, z0 - nz], [x1 - nx, y1, z1 - nz], [x1 + nx, y1, z1 + nz], color, up);
@@ -303,10 +301,10 @@ export function buildRoads(
     const p = f.properties;
     const pos = Number(p.position_par_rapport_au_sol ?? 0);
     if (pos < 0) continue; // tunnel
-    const style = ROAD_STYLE[String(p.nature)];
-    if (!style) continue; // sentiers, escaliers, bacs
-    const width = Number(p.largeur_de_chaussee) > 0 ? Number(p.largeur_de_chaussee) : style.w;
-    const color = hexLinear(style.color);
+    const style = ROAD_CLASSES[String(p.nature)];
+    if (!style) continue; // escaliers, bacs
+    const width = roadWidth(p);
+    const color = hexLinear(roadColor(p));
     for (const line of geoToLines(f.geometry, proj)) {
       // Pont : on garde l'altitude BD TOPO de la chaussée ; sinon on épouse le relief.
       const own = pos > 0 && line.every((pt) => Number.isFinite(pt[1]));

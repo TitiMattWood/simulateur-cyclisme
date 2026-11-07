@@ -199,8 +199,11 @@ export interface GeoFeature {
   properties: Record<string, unknown>;
 }
 
-/** Objets BD TOPO d'une couche dans une boîte (pagination automatique). */
-export async function fetchWfs(layer: string, b: BBox, properties: string[], maxPages = 4): Promise<GeoFeature[]> {
+/**
+ * Objets BD TOPO d'une couche dans une boîte (pagination automatique).
+ * `cql` : filtre attributaire facultatif, par exemple « hauteur>90 ».
+ */
+export async function fetchWfs(layer: string, b: BBox, properties: string[], maxPages = 4, cql?: string): Promise<GeoFeature[]> {
   const PAGE = 5000;
   const all: GeoFeature[] = [];
   for (let page = 0; page < maxPages; page++) {
@@ -209,12 +212,15 @@ export async function fetchWfs(layer: string, b: BBox, properties: string[], max
       VERSION: '2.0.0',
       REQUEST: 'GetFeature',
       TYPENAMES: `BDTOPO_V3:${layer}`,
-      BBOX: `${b.minLat.toFixed(6)},${b.minLon.toFixed(6)},${b.maxLat.toFixed(6)},${b.maxLon.toFixed(6)},urn:ogc:def:crs:EPSG::4326`,
       OUTPUTFORMAT: 'application/json',
       COUNT: String(PAGE),
       STARTINDEX: String(page * PAGE),
       PROPERTYNAME: ['geometrie', ...properties].join(','),
     });
+    // BBOX et CQL_FILTER s'excluent : avec un filtre, la boîte passe dans le filtre.
+    const box = `${b.minLat.toFixed(6)},${b.minLon.toFixed(6)},${b.maxLat.toFixed(6)},${b.maxLon.toFixed(6)}`;
+    if (cql) params.set('CQL_FILTER', `${cql} AND BBOX(geometrie,${box},'urn:ogc:def:crs:EPSG::4326')`);
+    else params.set('BBOX', `${box},urn:ogc:def:crs:EPSG::4326`);
     const res = await cachedFetch(`${IGN.wfs}?${params}`);
     const json = (await res.json()) as { features?: GeoFeature[]; numberMatched?: number };
     const feats = json.features ?? [];
