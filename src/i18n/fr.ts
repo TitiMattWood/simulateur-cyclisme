@@ -8,6 +8,7 @@ export const fr = {
   'world.valdoise': 'Horizon du 95',
   'world.cotedor': 'Côtes et Moutarde',
   'world.montagne': "L'air de la Montagne",
+  'world.paris': 'Paris',
   'world.gpx': 'Mon fichier GPX',
   'ride.start': 'Rouler',
   'ride.routes': 'Parcours tracés',

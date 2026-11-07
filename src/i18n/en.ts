@@ -10,6 +10,7 @@ export const en: Record<keyof typeof fr, string> = {
   'world.valdoise': 'Horizon du 95',
   'world.cotedor': 'Côtes et Moutarde',
   'world.montagne': "L'air de la Montagne",
+  'world.paris': 'Paris',
   'world.gpx': 'My GPX file',
   'ride.start': 'Ride',
   'ride.routes': 'Set routes',

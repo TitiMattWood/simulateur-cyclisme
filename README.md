@@ -15,7 +15,8 @@ Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **
 | Points de départ : Cergy (Axe Majeur, Village, Cergy-le-Haut), Vauréal, Franconville, Ermont, Sannois, Montsoult, Marines, Dijon, Longvic, lac Kir, Albertville, Bourg-d'Oisans ; ou n'importe quelle adresse (géocodage IGN) | ✅ |
 | Terrain aplani sous toutes les routes (chaussée posée sur son replat dans les pentes) | ✅ |
 | Revêtements : bitume, allées revêtues, gravier, terre (estimés d'après la BD TOPO) → Crr de la physique, couleur de la chaussée, reconnus aussi sous les tracés GPX | ✅ |
-| Monuments : tour Eiffel, gratte-ciel de Paris et de La Défense (hauteurs BD TOPO, visibles depuis Cergy), tour Belvédère, colonnes de l'esplanade, passerelle rouge de l'Axe Majeur, moulin de Sannois, flèche de Saint-Bénigne ; toits vernissés des églises de Côte-d'Or ; tours et châteaux en pierre | ✅ |
+| Monuments de Paris modélisés et orientés comme les vrais : tour Eiffel, Arc de Triomphe, Notre-Dame (tours, flèche), Sacré-Cœur, Dôme des Invalides, Panthéon, Pyramide du Louvre, Grande Arche (creuse) ; le reste de Paris vient de la BD TOPO (emprises et hauteurs réelles). Départs : Champ-de-Mars, Notre-Dame, Champs-Élysées, Montmartre | ✅ |
+| Autres monuments : gratte-ciel de Paris et de La Défense (hauteurs BD TOPO, visibles depuis Cergy), tour Belvédère, colonnes de l'esplanade, passerelle rouge de l'Axe Majeur, moulin de Sannois, flèche de Saint-Bénigne ; toits vernissés des églises de Côte-d'Or ; tours et châteaux en pierre | ✅ |
 | Transmission virtuelle au choix : mono ou double plateau (séquentiel ou avec touche plateau), cassette, pneu | ✅ |
 | Alpe d'Huez : montée officielle de 13,8 km (Bourg-d'Oisans → avenue du Rif Nel) | ✅ |
 

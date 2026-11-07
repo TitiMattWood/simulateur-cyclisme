@@ -262,7 +262,10 @@ export class WorldStreamer {
   private excluded(f: GeoFeature, ex: Exclusion[]): boolean {
     const polys = geoToPolys(f.geometry, this.track.proj);
     if (!polys.length) return false;
-    const [x, z] = polys[0].outer[0];
+    const ring = polys[0].outer;
+    let x = 0, z = 0;
+    for (const [px, pz] of ring) { x += px; z += pz; }
+    x /= ring.length; z /= ring.length;
     return ex.some((e) => Math.hypot(x - e.x, z - e.z) < e.r);
   }
 

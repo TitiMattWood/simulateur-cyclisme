@@ -156,7 +156,7 @@ export class App {
       </svg>
       <h3>${t('free.title')}</h3>
       <p class="hint">${t('free.hint')}</p>
-      ${worlds.map((w) => `<div class="starts"><b>${t(`world.${w}` as I18nKey)}</b>${START_POINTS.filter((s) => s.world === w).map((s) => `<button data-start="${s.id}" class="chip ${this.freeStart?.name === s.name ? 'sel' : ''}">${escapeHtml(s.name)}</button>`).join('')}</div>`).join('')}
+      ${[...worlds, 'paris' as const].map((w) => `<div class="starts"><b>${t(`world.${w}` as I18nKey)}</b>${START_POINTS.filter((s) => s.world === w).map((s) => `<button data-start="${s.id}" class="chip ${this.freeStart?.name === s.name ? 'sel' : ''}">${escapeHtml(s.name)}</button>`).join('')}</div>`).join('')}
       <form class="search" id="free-search"><input type="search" id="free-q" placeholder="${t('free.search')}" autocomplete="off"><button type="submit">${t('free.go')}</button></form>
       ${this.searchResults.length ? `<div class="starts">${this.searchResults.map((r, i) => `<button data-res="${i}" class="chip ${this.freeStart?.name === r.name ? 'sel' : ''}">${escapeHtml(r.name)}</button>`).join('')}</div>` : ''}
       ${this.freeStart ? `<button class="primary big" id="free-start">${t('free.start', { name: this.freeStart.name })}</button>` : ''}
