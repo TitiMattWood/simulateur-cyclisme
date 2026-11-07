@@ -6,6 +6,7 @@
  * (Une synchronisation via le NAS est prévue en v2.)
  */
 import type { Kit, FrameId, WheelId } from '../physics/equipment';
+import { DEFAULT_DRIVETRAIN, type Drivetrain } from '../physics/gears';
 import type { RideSummary } from '../ride/recorder';
 import type { QualityLevel } from '../config';
 import type { Lang } from '../i18n';
@@ -31,9 +32,12 @@ export interface Profile {
   /** braquet réel monté sur le trainer en mode virtuel */
   chainring: number;
   cogTeeth: number;
-  /** touches clavier « vitesse + » et « vitesse − » (valeur KeyboardEvent.key), pour les manettes via BikeControl */
+  /** transmission simulée en mode virtuel (plateaux, cassette, pneu) */
+  drivetrain: Drivetrain;
+  /** touches clavier « vitesse + », « vitesse − » et « plateau » (valeur KeyboardEvent.key), pour les manettes via BikeControl */
   keyGearUp: string;
   keyGearDown: string;
+  keyFront: string;
   /** vrai une fois le profil rempli au premier lancement */
   configured: boolean;
 }
@@ -66,8 +70,10 @@ export function defaultProfile(): Profile {
     shifting: 'virtual',
     chainring: 50,
     cogTeeth: 17,
+    drivetrain: { ...DEFAULT_DRIVETRAIN },
     keyGearUp: 'PageUp',
     keyGearDown: 'PageDown',
+    keyFront: 'f',
     configured: false,
   };
 }
@@ -83,7 +89,12 @@ function normalize(raw: unknown): SaveData {
   const r = raw as Partial<SaveData>;
   return {
     version: 1,
-    profile: { ...base.profile, ...(r.profile ?? {}), kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) } },
+    profile: {
+      ...base.profile,
+      ...(r.profile ?? {}),
+      kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) },
+      drivetrain: { ...base.profile.drivetrain, ...(r.profile?.drivetrain ?? {}) },
+    },
     history: Array.isArray(r.history) ? r.history : [],
     xp: typeof r.xp === 'number' ? r.xp : 0,
   };

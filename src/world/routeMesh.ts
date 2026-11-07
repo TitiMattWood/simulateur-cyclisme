@@ -11,6 +11,8 @@ import type { Route } from '../geo/route';
 const CHUNK = 80; // échantillons de 5 m → 400 m
 
 const ASPHALT = hexLinear('#4f5257');
+/** couleur de chaussée selon le revêtement (indices de SURFACES) */
+const SURFACE_COLORS = [ASPHALT, hexLinear('#5d5a55'), hexLinear('#b9a27c'), hexLinear('#9c845f')];
 const SHOULDER = hexLinear('#6d6a62');
 const LINE = hexLinear('#e8e8e2');
 
@@ -61,9 +63,11 @@ export class RouteMesh {
     const up: [number, number, number] = [0, 1, 0];
     const W = ROAD_HALF_WIDTH;
     // Bande [o0, o1] (décalages latéraux en m, gauche négatif) à la hauteur h au-dessus de la route.
-    const band = (o0: number, o1: number, lift: number, color: RGB, dash = false) => {
+    const band = (o0: number, o1: number, lift: number, color: RGB | null, dash = false) => {
       for (let i = a; i < b; i++) {
         if (dash && Math.floor(r.dist[i] / 6) % 2 === 1) continue;
+        // les lignes blanches ne sont peintes que sur le bitume
+        if (color === LINE && r.surface[i] > 1) continue;
         const pts = [i, i + 1].map((k) => {
           const nx = -r.dirZ[k], nz = r.dirX[k]; // normale à droite du sens de marche
           const y = r.ele[k] + lift;
@@ -72,11 +76,11 @@ export class RouteMesh {
             [r.x[k] + nx * o1, y, r.z[k] + nz * o1],
           ];
         });
-        mb.quad(pts[0][0], pts[0][1], pts[1][1], pts[1][0], color, up);
+        mb.quad(pts[0][0], pts[0][1], pts[1][1], pts[1][0], color ?? SURFACE_COLORS[r.surface[i]] ?? ASPHALT, up);
       }
     };
     band(-W - 0.6, W + 0.6, 0.05, SHOULDER);
-    band(-W, W, 0.08, ASPHALT);
+    band(-W, W, 0.08, null);
     band(-W + 0.15, -W + 0.3, 0.1, LINE);
     band(W - 0.3, W - 0.15, 0.1, LINE);
     band(-0.07, 0.07, 0.1, LINE, true);

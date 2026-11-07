@@ -5,7 +5,21 @@ générés à partir des données ouvertes de l'IGN, avec un home trainer connec
 
 Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **L'air de la Montagne** (Alpes).
 
-## État : lot 1 (socle)
+## État : lots 1 et 2
+
+### Lot 2 : trajet libre, revêtements, monuments
+
+| Fonction | État |
+|---|---|
+| **Trajet libre** partout en France : réseau routier BD TOPO construit à la volée, choix de direction à chaque carrefour (← / → ou boutons ◀ ▶), demi-tour (U), nom des rues, mini-carte orientée, profil des 1,5 km à venir | ✅ |
+| Points de départ : Cergy (Axe Majeur, Village, Cergy-le-Haut), Vauréal, Franconville, Ermont, Sannois, Montsoult, Marines, Dijon, Longvic, lac Kir, Albertville, Bourg-d'Oisans ; ou n'importe quelle adresse (géocodage IGN) | ✅ |
+| Terrain aplani sous toutes les routes (chaussée posée sur son replat dans les pentes) | ✅ |
+| Revêtements : bitume, allées revêtues, gravier, terre (estimés d'après la BD TOPO) → Crr de la physique, couleur de la chaussée, reconnus aussi sous les tracés GPX | ✅ |
+| Monuments : tour Eiffel, gratte-ciel de Paris et de La Défense (hauteurs BD TOPO, visibles depuis Cergy), tour Belvédère, colonnes de l'esplanade, passerelle rouge de l'Axe Majeur, moulin de Sannois, flèche de Saint-Bénigne ; toits vernissés des églises de Côte-d'Or ; tours et châteaux en pierre | ✅ |
+| Transmission virtuelle au choix : mono ou double plateau (séquentiel ou avec touche plateau), cassette, pneu | ✅ |
+| Alpe d'Huez : montée officielle de 13,8 km (Bourg-d'Oisans → avenue du Rif Nel) | ✅ |
+
+### Lot 1 : socle
 
 | Fonction | État |
 |---|---|
@@ -25,9 +39,6 @@ Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **
 
 ### Lots suivants
 
-2. **Cartes en monde ouvert** Val-d'Oise et Côte-d'Or (choix aux intersections), revêtements réels (gravel),
-   monuments modélisés (Axe Majeur, passerelle rouge, Douze Colonnes, moulin de Sannois, centre de Dijon),
-   vue lointaine sur la tour Eiffel et La Défense, cols supplémentaires.
 3. Sortie en groupe et course contre l'IA (aspiration, barre d'aspiration, demi-tour, attaques, fatigue).
    Lecture directe des manettes Zwift Click/Play en Bluetooth (sans BikeControl), si leur protocole le permet.
 4. Entraînement structuré (mode ERG) et défis KOM (détection automatique des montées, fantôme du record).
@@ -72,7 +83,7 @@ L'application est un site statique (dossier `dist/`), sans serveur applicatif.
 
 ## Clavier
 
-`1`–`5` caméras · `C` caméra suivante · `B` (maintenir) regard arrière · `H` masquer le tableau de bord ·
+`←` `→` direction au prochain carrefour (trajet libre) · `U` demi-tour · `1`–`5` caméras · `C` caméra suivante · `B` (maintenir) regard arrière · `H` masquer le tableau de bord ·
 `+` / `-` (ou les touches choisies dans le profil, `PageUp` / `PageDown` par défaut) vitesses virtuelles ·
 `↑` `↓` puissance en mode démo (`Maj` = ±50 W) · `Espace` / `Échap` pause.
 

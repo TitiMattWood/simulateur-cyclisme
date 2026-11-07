@@ -104,7 +104,8 @@ export function geoToLines(geom: { type: string; coordinates: unknown }, proj: L
     : geom.type === 'LineString' ? [geom.coordinates as number[][]] : [];
   return lines.map((l) => l.map(([lon, lat, h]) => {
     const p = proj.toLocal(lat, lon);
-    return [p.x, Number.isFinite(h) ? h : NaN, p.z] as [number, number, number];
+    // la BD TOPO code « altitude inconnue » par −1000
+    return [p.x, Number.isFinite(h) && h > -500 ? h : NaN, p.z] as [number, number, number];
   }));
 }
 
@@ -167,4 +168,73 @@ export function hashString(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
+}
+
+/**
+ * Index spatial de segments (grille de hachage) : retrouve vite le segment le plus proche
+ * d'un point. Sert à aplanir le terrain sous les routes, écarter les arbres de la chaussée,
+ * reconnaître le revêtement sous un tracé GPX, etc.
+ */
+export class SegmentIndex<T> {
+  private readonly grid = new Map<number, number[]>();
+  private readonly segs: Array<{ ax: number; az: number; bx: number; bz: number; data: T }> = [];
+
+  constructor(private readonly cell = 25) {}
+
+  get size(): number {
+    return this.segs.length;
+  }
+
+  private key(cx: number, cz: number): number {
+    return (cx + 50000) * 100000 + (cz + 50000);
+  }
+
+  add(ax: number, az: number, bx: number, bz: number, data: T): void {
+    const id = this.segs.length;
+    this.segs.push({ ax, az, bx, bz, data });
+    const c = this.cell;
+    for (let cx = Math.floor(Math.min(ax, bx) / c); cx <= Math.floor(Math.max(ax, bx) / c); cx++) {
+      for (let cz = Math.floor(Math.min(az, bz) / c); cz <= Math.floor(Math.max(az, bz) / c); cz++) {
+        const k = this.key(cx, cz);
+        let l = this.grid.get(k);
+        if (!l) this.grid.set(k, (l = []));
+        l.push(id);
+      }
+    }
+  }
+
+  /**
+   * Segment le plus proche à moins de maxDist. `reach(data)` peut élargir la distance
+   * acceptée segment par segment (par exemple la demi-largeur de la route).
+   */
+  nearest(x: number, z: number, maxDist: number, reach?: (d: T) => number):
+    { dist: number; t: number; px: number; pz: number; data: T; ax: number; az: number; bx: number; bz: number } | null {
+    const r = Math.ceil(maxDist / this.cell);
+    const cx = Math.floor(x / this.cell), cz = Math.floor(z / this.cell);
+    let best: ReturnType<SegmentIndex<T>['nearest']> = null;
+    let bestScore = Infinity;
+    const seen = new Set<number>();
+    for (let i = cx - r; i <= cx + r; i++) {
+      for (let j = cz - r; j <= cz + r; j++) {
+        const l = this.grid.get(this.key(i, j));
+        if (!l) continue;
+        for (const id of l) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const s = this.segs[id];
+          const vx = s.bx - s.ax, vz = s.bz - s.az;
+          const l2 = vx * vx + vz * vz || 1e-9;
+          const t = Math.max(0, Math.min(1, ((x - s.ax) * vx + (z - s.az) * vz) / l2));
+          const px = s.ax + vx * t, pz = s.az + vz * t;
+          const d = Math.hypot(x - px, z - pz);
+          const score = d - (reach ? reach(s.data) : 0);
+          if (d <= maxDist && score < bestScore) {
+            bestScore = score;
+            best = { dist: d, t, px, pz, data: s.data, ax: s.ax, az: s.az, bx: s.bx, bz: s.bz };
+          }
+        }
+      }
+    }
+    return best;
+  }
 }

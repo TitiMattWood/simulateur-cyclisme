@@ -7,6 +7,8 @@
  */
 import { LocalProjection, geodesicDistance } from './projection';
 import type { GpxPoint } from './gpx';
+import type { SurfaceId } from '../physics/equipment';
+import type { Track } from './track';
 
 /** Pas de ré-échantillonnage (m). */
 export const ROUTE_STEP = 5;
@@ -34,13 +36,19 @@ export interface RouteSample {
   /** distance depuis le départ (m) */
   dist: number;
   index: number;
+  /** revêtement sous la roue */
+  surface: SurfaceId;
 }
 
+/** Codes compacts des revêtements (tableaux Uint8Array). */
+export const SURFACES: SurfaceId[] = ['asphalt', 'rough', 'gravel', 'dirt'];
+
 export const emptySample = (): RouteSample => ({
-  x: 0, z: 0, ele: 0, grade: 0, dirX: 1, dirZ: 0, lat: 0, lon: 0, vmax: VMAX_ABS, dist: 0, index: 0,
+  x: 0, z: 0, ele: 0, grade: 0, dirX: 1, dirZ: 0, lat: 0, lon: 0, vmax: VMAX_ABS, dist: 0, index: 0, surface: 'asphalt',
 });
 
-export class Route {
+export class Route implements Track {
+  readonly open = false;
   readonly name: string;
   readonly proj: LocalProjection;
   readonly n: number;
@@ -58,6 +66,8 @@ export class Route {
   readonly dirX: Float32Array;
   readonly dirZ: Float32Array;
   readonly vmax: Float32Array;
+  /** revêtement par échantillon (indice dans SURFACES), reconnu d'après la BD TOPO */
+  readonly surface: Uint8Array;
   readonly length: number;
   readonly isLoop: boolean;
   readonly bbox: { minX: number; maxX: number; minZ: number; maxZ: number };
@@ -96,7 +106,8 @@ export class Route {
       this.dirX[i] = dx / l;
       this.dirZ[i] = dz / l;
     }
-    this.vmax = computeSpeedLimits(this);
+    this.vmax = speedLimits(this.dist, this.dirX, this.dirZ);
+    this.surface = new Uint8Array(n);
 
     const raw = eles ? Float32Array.from(eles) : new Float32Array(n);
     this.rawEle = raw;
@@ -185,6 +196,7 @@ export class Route {
     out.vmax = Math.min(this.vmax[i], this.vmax[j]);
     out.dist = dd;
     out.index = i;
+    out.surface = SURFACES[this.surface[t < 0.5 ? i : j]];
     return out;
   }
 
@@ -321,24 +333,24 @@ function patchRuns(e: Float32Array, filtered: Float32Array, sign: number, step: 
   return out;
 }
 
-/** Vitesse maximale en virage (freinage automatique avant les épingles). */
-function computeSpeedLimits(r: Route): Float32Array {
-  const n = r.n;
+/** Vitesse maximale en virage (freinage automatique avant les épingles et aux carrefours). */
+export function speedLimits(dist: ArrayLike<number>, dirX: ArrayLike<number>, dirZ: ArrayLike<number>): Float32Array {
+  const n = dist.length;
   const vc = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const a = Math.max(0, i - 3), b = Math.min(n - 1, i + 3);
-    const ha = Math.atan2(r.dirZ[a], r.dirX[a]);
-    const hb = Math.atan2(r.dirZ[b], r.dirX[b]);
+    const ha = Math.atan2(dirZ[a], dirX[a]);
+    const hb = Math.atan2(dirZ[b], dirX[b]);
     let dh = hb - ha;
     while (dh > Math.PI) dh -= 2 * Math.PI;
     while (dh < -Math.PI) dh += 2 * Math.PI;
-    const ds = r.dist[b] - r.dist[a] || 1;
+    const ds = dist[b] - dist[a] || 1;
     const kappa = Math.abs(dh) / ds; // courbure = 1 / rayon
     vc[i] = kappa > 1e-4 ? Math.min(VMAX_ABS, Math.sqrt(LATERAL_ACCEL / kappa)) : VMAX_ABS;
   }
   // Passe arrière : on commence à freiner suffisamment tôt avant le virage.
   for (let i = n - 2; i >= 0; i--) {
-    const ds = r.dist[i + 1] - r.dist[i];
+    const ds = dist[i + 1] - dist[i];
     vc[i] = Math.min(vc[i], Math.sqrt(vc[i + 1] * vc[i + 1] + 2 * BRAKE_DECEL * ds));
   }
   return vc;

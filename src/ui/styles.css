@@ -61,6 +61,12 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .france .marker.sel circle { fill: rgba(246, 174, 45, .55); stroke: #f6ae2d; }
 
 .routes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.starts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.starts b { width: 100%; font-size: .8rem; color: var(--muted); }
+.chip { padding: 6px 10px; border-radius: 999px; font-size: .85rem; }
+.chip.sel { border-color: var(--accent); background: rgba(228,87,46,.18); }
+.search { display: flex; gap: 6px; margin: 8px 0; }
+.search input { flex: 1; min-width: 0; background: #20262d; border: 1px solid var(--line); border-radius: 8px; padding: 8px; color: var(--text); }
 .routes button { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 2px; }
 .routes button small { color: var(--muted); }
 .routes button.sel { border-color: var(--accent); background: rgba(228,87,46,.15); }
@@ -85,6 +91,7 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .grid2 > *, .grid3 > * { min-width: 0; }
+.profile h4.sub { margin: 10px 0 2px; font-size: .85rem; color: var(--text); }
 .profile input { max-width: 100%; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .history { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
@@ -108,7 +115,17 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .metric { display: flex; flex-direction: column; align-items: center; min-width: 70px; }
 .metric span { font-size: clamp(1.4rem, 2.6vw, 2.4rem); font-weight: 700; line-height: 1.1; }
 .metric small { color: var(--muted); font-size: .75rem; }
+.hud-center { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .hud-power { text-align: center; min-width: 200px; }
+.hud-turn { text-align: center; min-width: 200px; }
+.turn-dist { font-size: .85rem; color: #d3dae2; }
+.turn-arrows { display: flex; justify-content: center; gap: 10px; margin: 4px 0; }
+.turn-arrows .arrow { display: inline-block; font-size: 1.6rem; font-weight: 800; color: rgba(255,255,255,.35); transition: color .15s; }
+.turn-arrows .arrow.sel { color: #f97316; }
+.turn-name { font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-keys { font-size: .7rem; color: var(--muted); }
+.hud-status .surface { color: #e7c98f; }
+.hud-status .road { color: #d3dae2; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .power-main span { font-size: clamp(2.6rem, 5vw, 4.4rem); font-weight: 800; line-height: 1; }
 .power-main small { font-size: 1.2rem; margin-left: 4px; color: var(--muted); }
 .power-sub { color: #d3dae2; font-size: .9rem; margin-top: 2px; }
@@ -129,8 +146,9 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .hud-status .braking { color: #fca5a5; }
 .hud-profile { position: absolute; left: 12px; right: 12px; bottom: 12px; height: 88px; width: calc(100% - 24px);
   background: rgba(14,17,21,.6); border-radius: 12px; }
-.touch-bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 110px; display: flex; gap: 6px; pointer-events: auto; opacity: .85; }
-.touch-bar button { min-width: 52px; padding: 10px 14px; background: rgba(14,17,21,.75); }
+.touch-bar { position: absolute; right: 14px; bottom: 108px; max-width: 52%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; pointer-events: auto; opacity: .88; }
+.touch-bar button { min-width: 48px; padding: 9px 12px; background: rgba(14,17,21,.75); white-space: nowrap; font-size: .9rem; }
+.hud-status { max-width: 46%; flex-wrap: wrap; }
 
 /* ---------- Fenêtres (pause, bilan) ---------- */
 .modal { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }

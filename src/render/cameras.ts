@@ -7,7 +7,7 @@
  *  5. Réalisation TV : plans automatiques (bord de route, moto, hélicoptère).
  */
 import * as THREE from 'three';
-import type { Route } from '../geo/route';
+import type { Track } from '../geo/track';
 import type { RiderModel } from './riderModel';
 
 export type CamMode = 'action' | 'cockpit' | 'chase' | 'drone' | 'tv';
@@ -24,7 +24,7 @@ interface TvShot {
 
 export interface CamContext {
   rider: RiderModel;
-  route: Route;
+  route: Track;
   dist: number;
   groundAt: (x: number, z: number) => number | null;
   /** vrai si un obstacle (bâtiment) coupe la ligne de vue entre deux points */
