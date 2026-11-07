@@ -30,11 +30,8 @@ export const CHAINRINGS: Record<string, number[]> = {
   '50/34': [50, 34],
   '48/35': [48, 35],
   '46/30': [46, 30],
-  '38': [38],
-  '40': [40],
-  '42': [42],
-  '44': [44],
-  '46': [46],
+  // monoplateau : de 38 à 50 dents
+  ...Object.fromEntries(Array.from({ length: 13 }, (_, i) => [String(38 + i), [38 + i]])),
 };
 
 /** Cassettes proposées (dentures usuelles, du plus petit au plus grand pignon). */

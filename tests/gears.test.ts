@@ -61,3 +61,14 @@ describe('vitesses virtuelles', () => {
     expect(cadenceFor(10, box.development)).toBeCloseTo(96.9, 0);
   });
 });
+
+describe('plateaux proposés', () => {
+  it('monoplateau de 38 à 50 dents, en plus des doubles', async () => {
+    const { CHAINRINGS } = await import('../src/physics/gears');
+    const mono = Object.values(CHAINRINGS).filter((r) => r.length === 1).map((r) => r[0]);
+    expect(mono).toEqual([38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
+    expect(CHAINRINGS['50/34']).toEqual([50, 34]);
+    const box = new GearBox({ chainrings: '50', cassette: '11-34 (12 v)', tire: '700x28', sequential: true });
+    expect(box.ring).toBe(50);
+  });
+});
