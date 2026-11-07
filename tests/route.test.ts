@@ -45,3 +45,15 @@ describe('GPX et parcours', () => {
     expect(idx.nearest(mid.x, mid.z + 50, 10)).toBeNull();
   });
 });
+
+describe('catalogue des parcours', () => {
+  it('chaque parcours se lit et sa longueur correspond à la description', async () => {
+    const { ROUTES } = await import('../src/data/routes');
+    for (const r of ROUTES) {
+      const gpx = parseGpx(readFileSync(`public/${r.file}`, 'utf8'));
+      const route = Route.fromPoints(r.name, gpx.points);
+      const km = Number(/· (\d+) km/.exec(r.description)?.[1]);
+      expect(Math.abs(route.length / 1000 - km), r.id).toBeLessThan(1.5);
+    }
+  });
+});

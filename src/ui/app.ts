@@ -338,7 +338,7 @@ export class App {
       this.renderHome();
     });
     $(this.ui, '#bk-export').addEventListener('click', () => {
-      downloadFile(exportBackup(this.save), safeFilename('sauvegarde', new Date(), 'json'), 'application/json');
+      downloadFile(exportBackup(this.save), safeFilename('MyHomeRide-sauvegarde', new Date(), 'json'), 'application/json');
     });
     $<HTMLInputElement>(this.ui, '#bk-import').addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];

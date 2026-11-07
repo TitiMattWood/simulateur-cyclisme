@@ -1,8 +1,7 @@
 /**
  * Réglages globaux de l'application.
- * Le nom est provisoire : il suffit de le changer ici quand tu auras choisi.
  */
-export const APP_NAME = 'Simulateur Cyclisme';
+export const APP_NAME = 'MyHomeRide by Titi';
 export const APP_VERSION = '0.1.0';
 
 /** Points d'accès de la Géoplateforme IGN (données ouvertes, Licence Ouverte Etalab 2.0). */
