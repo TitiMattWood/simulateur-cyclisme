@@ -26,6 +26,14 @@ export interface Profile {
   quality: QualityLevel;
   /** part de la pente réellement envoyée au trainer (1 = 100 %) */
   trainerDifficulty: number;
+  /** changement de vitesse : cassette réelle, ou vitesses virtuelles (pignon unique type Zwift Cog) */
+  shifting: 'manual' | 'virtual';
+  /** braquet réel monté sur le trainer en mode virtuel */
+  chainring: number;
+  cogTeeth: number;
+  /** touches clavier « vitesse + » et « vitesse − » (valeur KeyboardEvent.key), pour les manettes via BikeControl */
+  keyGearUp: string;
+  keyGearDown: string;
   /** vrai une fois le profil rempli au premier lancement */
   configured: boolean;
 }
@@ -55,6 +63,11 @@ export function defaultProfile(): Profile {
     lang: 'fr',
     quality: 'medium',
     trainerDifficulty: 1,
+    shifting: 'virtual',
+    chainring: 50,
+    cogTeeth: 17,
+    keyGearUp: 'PageUp',
+    keyGearDown: 'PageDown',
     configured: false,
   };
 }

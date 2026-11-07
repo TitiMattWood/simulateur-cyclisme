@@ -212,6 +212,8 @@ export class App {
     const supported = this.devices.supported;
     return `
       ${supported ? '' : `<p class="warn">${t('dev.unsupported')}</p>`}
+      ${!supported && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent) ? `<p class="warn">${t('dev.linux')}</p>` : ''}
+      ${this.profile.shifting === 'virtual' && this.devices.sensors.trainer?.status === 'connected' && !this.devices.trainer ? `<p class="warn">${t('dev.virtualNeedsControl')}</p>` : ''}
       <ul class="devices">${kinds.map((k) => {
         const s = this.devices.sensors[k];
         const status = s ? t(`dev.status.${s.status}` as I18nKey) : '';
@@ -285,6 +287,20 @@ export class App {
           <label>${t('pf.helmet')}<input type="color" id="pf-hc" value="${p.helmetColor}"></label>
         </div>
         <label>${t('pf.difficulty', { v: Math.round(p.trainerDifficulty * 100) })}<input type="range" id="pf-diff" min="0" max="100" step="5" value="${Math.round(p.trainerDifficulty * 100)}"></label>
+        <fieldset><legend>${t('pf.shifting')}</legend>
+          <label class="check"><input type="radio" name="pf-shift" value="virtual" ${p.shifting === 'virtual' ? 'checked' : ''}> ${t('pf.shift.virtual')}</label>
+          <label class="check"><input type="radio" name="pf-shift" value="manual" ${p.shifting === 'manual' ? 'checked' : ''}> ${t('pf.shift.manual')}</label>
+          <div class="grid2">
+            ${num('pf-ring', 'pf.chainring', p.chainring, 20, 60)}
+            ${num('pf-cog', 'pf.cog', p.cogTeeth, 10, 36)}
+          </div>
+          <p class="hint">${t('pf.cogHint')}</p>
+          <div class="grid2">
+            <label>${t('pf.keyUp')}<input type="text" readonly class="keycap" id="pf-kup" value="${escapeHtml(p.keyGearUp)}"></label>
+            <label>${t('pf.keyDown')}<input type="text" readonly class="keycap" id="pf-kdown" value="${escapeHtml(p.keyGearDown)}"></label>
+          </div>
+          <p class="hint">${t('pf.keyHint')}</p>
+        </fieldset>
         <div class="grid2">
           <label>${t('pf.quality')}<select id="pf-quality">${opt<QualityLevel>(['low', 'medium', 'high'], p.quality, (v) => t(`q.${v}` as I18nKey))}</select></label>
           <label>${t('pf.lang')}<select id="pf-lang">${opt<Lang>(['fr', 'en'], p.lang, (v) => (v === 'fr' ? 'Français' : 'English'))}</select></label>
@@ -308,6 +324,14 @@ export class App {
       const lbl = (e.target as HTMLElement).parentElement!;
       lbl.firstChild!.textContent = t('pf.difficulty', { v: (e.target as HTMLInputElement).value });
     });
+    // Champs « touche » : on clique dedans puis on appuie sur la touche (ou sur la manette via BikeControl).
+    this.ui.querySelectorAll<HTMLInputElement>('.keycap').forEach((inp) =>
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') return;
+        e.preventDefault();
+        inp.value = e.key;
+      }),
+    );
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const p = this.profile;
@@ -326,6 +350,11 @@ export class App {
         jerseyColor2: val('pf-j2'),
         helmetColor: val('pf-hc'),
         trainerDifficulty: clamp(parseFloat(val('pf-diff')) / 100, 0, 1, 1),
+        shifting: ($<HTMLInputElement>(this.ui, 'input[name=pf-shift]:checked')?.value ?? 'virtual') as Profile['shifting'],
+        chainring: Math.round(clamp(parseFloat(val('pf-ring')), 20, 60, p.chainring)),
+        cogTeeth: Math.round(clamp(parseFloat(val('pf-cog')), 10, 36, p.cogTeeth)),
+        keyGearUp: val('pf-kup') || 'PageUp',
+        keyGearDown: val('pf-kdown') || 'PageDown',
         quality,
         lang,
         configured: true,
@@ -415,13 +444,16 @@ export class App {
     bar.className = 'touch-bar';
     bar.innerHTML = `
       <button data-act="cam">🎥 ${t('touch.cam')}</button>
-      <button data-act="down">−</button><button data-act="up">+</button>
+      ${this.profile.shifting === 'virtual' ? `<button data-act="gdown" title="${t('touch.gearDown')}">⚙ −</button><button data-act="gup" title="${t('touch.gearUp')}">⚙ +</button>` : ''}
+      ${this.devices.hasPowerSource ? '' : `<button data-act="down">− W</button><button data-act="up">+ W</button>`}
       <button data-act="pause">⏸ ${t('touch.pause')}</button>`;
     overlay.appendChild(bar);
     bar.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest('button')?.dataset.act;
       if (!this.ride) return;
       if (act === 'cam') this.ride.rig.next();
+      if (act === 'gup') this.ride.shift(1);
+      if (act === 'gdown') this.ride.shift(-1);
       if (act === 'up') this.devices.demoPower = Math.min(1500, this.devices.demoPower + 10);
       if (act === 'down') this.devices.demoPower = Math.max(0, this.devices.demoPower - 10);
       if (act === 'pause') { this.ride.pause(); this.showPause(); }

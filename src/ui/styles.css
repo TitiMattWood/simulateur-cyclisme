@@ -84,6 +84,8 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .profile fieldset { border: 1px solid var(--line); border-radius: 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.grid2 > *, .grid3 > * { min-width: 0; }
+.profile input { max-width: 100%; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .history { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .history li { background: #20262d; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 2px; }
@@ -122,6 +124,8 @@ button.big { width: 100%; padding: 14px; font-size: 1.1rem; margin-top: 8px; }
 .hud-status { position: absolute; left: 14px; bottom: 110px; display: flex; gap: 8px; font-size: .85rem; }
 .hud-status span:not(:empty) { background: rgba(14,17,21,.72); padding: 4px 8px; border-radius: 8px; }
 .hud-status .demo { color: #fde68a; }
+.hud-status .gear { color: #93c5fd; font-weight: 600; }
+.profile input.keycap { text-align: center; cursor: pointer; font-family: ui-monospace, monospace; }
 .hud-status .braking { color: #fca5a5; }
 .hud-profile { position: absolute; left: 12px; right: 12px; bottom: 12px; height: 88px; width: calc(100% - 24px);
   background: rgba(14,17,21,.6); border-radius: 12px; }

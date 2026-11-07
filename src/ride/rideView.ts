@@ -12,6 +12,8 @@ import { fetchRouteElevation } from '../geo/ign';
 import { WorldStreamer } from '../world/streamer';
 import { RouteMesh } from '../world/routeMesh';
 import { RiderDynamics, buildParams, airDensity, crrFor, type PhysicsParams } from '../physics/model';
+import { VIRTUAL_GEARS, DEFAULT_GEAR, realRatio, gearLabel, cadenceFor } from '../physics/gears';
+import { simulationParams } from '../physics/trainerSim';
 import type { DeviceManager } from '../devices/manager';
 import { Recorder, type RideSummary, type Sample } from './recorder';
 import { Hud } from '../ui/hud';
@@ -51,6 +53,8 @@ export class RideView implements View {
   private trainerTimer = 0;
   private hudTimer = 0;
   private ascent = 0;
+  /** rapport virtuel engagé (indice dans VIRTUAL_GEARS), si les vitesses virtuelles sont actives */
+  gear = DEFAULT_GEAR;
   private lastEle: number | null = null;
   private keyDown = (e: KeyboardEvent) => this.onKey(e, true);
   private keyUp = (e: KeyboardEvent) => this.onKey(e, false);
@@ -150,6 +154,12 @@ export class RideView implements View {
     if (e.target instanceof HTMLInputElement) return;
     if (e.key === 'b' || e.key === 'B') { this.rig.lookBack = down; return; }
     if (!down) return;
+    // Vitesses virtuelles : touches réglables (manettes via BikeControl) + « + » et « - ».
+    const p = this.profile;
+    if (p.shifting === 'virtual') {
+      if (e.key === p.keyGearUp || e.key === '+' || e.key === '=') { this.shift(1); e.preventDefault(); return; }
+      if (e.key === p.keyGearDown || e.key === '-') { this.shift(-1); e.preventDefault(); return; }
+    }
     const step = e.shiftKey ? 50 : 10;
     switch (e.key) {
       case 'ArrowUp': this.devices.demoPower = Math.min(1500, this.devices.demoPower + step); e.preventDefault(); break;
@@ -164,6 +174,19 @@ export class RideView implements View {
       default:
         if (e.key >= '1' && e.key <= '5') this.rig.setMode(CAM_MODES[Number(e.key) - 1]);
     }
+  }
+
+  /** Change de vitesse virtuelle (+1 plus dur, −1 plus souple) ; le trainer est mis à jour aussitôt. */
+  shift(delta: number): void {
+    if (this.profile.shifting !== 'virtual') return;
+    this.gear = Math.max(0, Math.min(VIRTUAL_GEARS.length - 1, this.gear + delta));
+    this.trainerTimer = 1;
+  }
+
+  /** Texte du rapport engagé, ou '' en changement de vitesse manuel. */
+  get gearText(): string {
+    if (this.profile.shifting !== 'virtual') return '';
+    return `⚙ ${this.gear + 1}/${VIRTUAL_GEARS.length} ${gearLabel(VIRTUAL_GEARS[this.gear])}`;
   }
 
   private placeRider(d: number): void {
@@ -184,6 +207,10 @@ export class RideView implements View {
     }
     const p = this.profile;
     this.live = this.devices.read(dt, p.ftp, p.hrMax);
+    if (this.live.source === 'demo' && p.shifting === 'virtual') {
+      // en démo, la cadence découle de la vitesse et du rapport engagé (roue libre si 0 W)
+      this.live.cadence = this.live.power > 0 ? Math.min(140, cadenceFor(this.dyn.v, VIRTUAL_GEARS[this.gear])) : 0;
+    }
     const moving = this.state === 'riding';
     const s = this.route.sampleAt(this.dist, this.sample);
     if (moving) {
@@ -236,23 +263,30 @@ export class RideView implements View {
         camera: t(`cam.${this.rig.mode}` as I18nKey),
         trainer: tr ? `🚲 ${tr.status === 'connected' ? (this.devices.trainer ? 'SIM' : 'W') : '…'}` : '',
         hrSensor: hrs ? `♥ ${hrs.status === 'connected' ? '' : '…'}` : '',
+        gear: this.gearText,
       });
     }
   }
 
   /**
-   * Mode SIM : une fois par seconde, on envoie au trainer la pente qui arrive
-   * (multipliée par la « difficulté du trainer »), le Crr et la résistance de l'air.
+   * Mode SIM : une fois par seconde (et aussitôt après un changement de vitesse), on envoie
+   * au trainer la pente qui arrive (multipliée par la « difficulté du trainer »), le Crr et
+   * la résistance de l'air. En vitesses virtuelles, ces valeurs sont converties pour que
+   * l'effort ressenti corresponde au braquet virtuel engagé (voir physics/trainerSim.ts).
    */
   private driveTrainer(dt: number, rho: number, crr: number, v: number): void {
     this.trainerTimer += dt;
     const tr = this.devices.trainer;
     if (!tr || this.trainerTimer < 1) return;
     this.trainerTimer = 0;
+    const p = this.profile;
     const ahead = this.route.sampleAt(this.dist + Math.max(5, v * 1.5));
-    const grade = ahead.grade * this.profile.trainerDifficulty;
-    const cw = 0.5 * rho * this.params.cda;
-    tr.setSimulation(grade, crr, cw, 0).catch(() => undefined);
+    const k = p.shifting === 'virtual' ? VIRTUAL_GEARS[this.gear] / realRatio(p.chainring, p.cogTeeth) : 1;
+    const sim = simulationParams({
+      grade: ahead.grade, crr, cw: 0.5 * rho * this.params.cda, headwind: 0,
+      difficulty: p.trainerDifficulty, k,
+    });
+    tr.setSimulation(sim.grade, sim.crr, sim.cw, sim.wind).catch(() => undefined);
   }
 
   private camContext() {

@@ -25,6 +25,8 @@ export interface HudState {
   camera: string;
   trainer: string; // état du trainer
   hrSensor: string;
+  /** rapport virtuel engagé (vide en changement de vitesse manuel) */
+  gear: string;
 }
 
 export class Hud {
@@ -61,7 +63,7 @@ export class Hud {
       <div class="hud-grade" data-q="gradebox"><span data-q="grade">0,0</span><small>%</small><div class="alt"><span data-q="ele">0</span> m</div></div>
       <canvas class="hud-map" width="180" height="180"></canvas>
       <div class="hud-status">
-        <span data-q="trainer"></span><span data-q="hrs"></span><span data-q="cam"></span>
+        <span data-q="trainer"></span><span data-q="hrs"></span><span data-q="gear" class="gear"></span><span data-q="cam"></span>
         <span class="demo" data-q="demo">${t('hud.demo')}</span>
         <span class="braking" data-q="braking">${t('hud.braking')}</span>
       </div>
@@ -102,6 +104,7 @@ export class Hud {
     q.trainer.textContent = s.trainer;
     q.hrs.textContent = s.hrSensor;
     q.cam.textContent = s.camera;
+    q.gear.textContent = s.gear;
     q.demo.style.display = s.demo ? '' : 'none';
     q.braking.style.display = s.braking ? '' : 'none';
 

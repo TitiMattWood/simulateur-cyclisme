@@ -14,6 +14,7 @@ Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **
 | Moteur physique (puissance → vitesse : masse, pente, CdA, Crr, altitude, vent, aspiration, cadre, roues, équipement) | ✅ (aspiration et vent prêts côté physique, utilisés à partir du lot 3 et du lot 6) |
 | Freinage automatique avant les virages serrés | ✅ |
 | Bluetooth : trainer FTMS (modes SIM et ERG), capteur de puissance, cardio (ceinture ou montre Coros/Garmin en diffusion), cadence ; reconnexion automatique | ✅ (ERG utilisé à partir du lot 4) |
+| Changement de vitesse au choix : **manuel** (cassette du vélo) ou **virtuel** (pignon unique type Zwift Cog, 24 rapports, touches réglables pour les manettes via BikeControl, boutons tactiles) | ✅ |
 | Mode démo sans capteur (puissance au clavier ou boutons tactiles) | ✅ |
 | 5 caméras : action cam, cockpit, poursuite (+ regard arrière), drone, réalisation TV | ✅ |
 | Tableau de bord : puissance, W/kg, zones, vitesse, cadence, FC, pente, distance, temps, D+, profil, mini-carte | ✅ |
@@ -28,7 +29,7 @@ Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **
    monuments modélisés (Axe Majeur, passerelle rouge, Douze Colonnes, moulin de Sannois, centre de Dijon),
    vue lointaine sur la tour Eiffel et La Défense, cols supplémentaires.
 3. Sortie en groupe et course contre l'IA (aspiration, barre d'aspiration, demi-tour, attaques, fatigue).
-   Manettes au cintre (Zwift Click/Play via BikeControl) et **vitesses virtuelles** pour le Zwift Cog.
+   Lecture directe des manettes Zwift Click/Play en Bluetooth (sans BikeControl), si leur protocole le permet.
 4. Entraînement structuré (mode ERG) et défis KOM (détection automatique des montées, fantôme du record).
 5. Progression : trophées, garage et avatar complet.
 6. Monde vivant : météo, cycle jour/nuit, audio 3D, trafic, piétons, événements, photo souvenir.
@@ -45,6 +46,8 @@ npm run build      # version de production dans dist/
 ## Matériel et navigateurs
 
 - **Bluetooth** : Chrome ou Edge sur Windows, macOS, Android et ChromeOS.
+  **Linux** : dans Chrome, activer `chrome://flags/#enable-experimental-web-platform-features` puis relancer ;
+  utiliser Chrome installé en paquet (.deb/.rpm), pas en Flatpak/Snap, avec le service Bluetooth (BlueZ) actif.
   Safari (Mac, iPhone, iPad) et Firefox ne gèrent pas le Web Bluetooth.
   Sur iPad, le navigateur **Bluefy** l'ajoute (à tester avec ton matériel).
 - **Apple TV** : tvOS n'a pas de navigateur. Il faut faire tourner l'application sur un iPad ou un Mac
@@ -70,6 +73,7 @@ L'application est un site statique (dossier `dist/`), sans serveur applicatif.
 ## Clavier
 
 `1`–`5` caméras · `C` caméra suivante · `B` (maintenir) regard arrière · `H` masquer le tableau de bord ·
+`+` / `-` (ou les touches choisies dans le profil, `PageUp` / `PageDown` par défaut) vitesses virtuelles ·
 `↑` `↓` puissance en mode démo (`Maj` = ±50 W) · `Espace` / `Échap` pause.
 
 ## Données et licences
