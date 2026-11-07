@@ -1,0 +1,107 @@
+/**
+ * Sauvegarde locale : profil, historique des sorties, XP.
+ *
+ * Les données restent dans le navigateur de l'appareil. Pour changer d'appareil ou de
+ * navigateur, on exporte un fichier de sauvegarde (.json) puis on le restaure ailleurs.
+ * (Une synchronisation via le NAS est prévue en v2.)
+ */
+import type { Kit, FrameId, WheelId } from '../physics/equipment';
+import type { RideSummary } from '../ride/recorder';
+import type { QualityLevel } from '../config';
+import type { Lang } from '../i18n';
+
+export interface Profile {
+  name: string;
+  weightKg: number;
+  heightCm: number;
+  ftp: number;
+  hrMax: number;
+  frame: FrameId;
+  wheels: WheelId;
+  kit: Kit;
+  jerseyColor: string;
+  jerseyColor2: string;
+  helmetColor: string;
+  lang: Lang;
+  quality: QualityLevel;
+  /** part de la pente réellement envoyée au trainer (1 = 100 %) */
+  trainerDifficulty: number;
+  /** vrai une fois le profil rempli au premier lancement */
+  configured: boolean;
+}
+
+export interface SaveData {
+  version: 1;
+  profile: Profile;
+  history: RideSummary[];
+  xp: number;
+}
+
+const KEY = 'simcyclo.save.v1';
+
+export function defaultProfile(): Profile {
+  return {
+    name: '',
+    weightKg: 72,
+    heightCm: 178,
+    ftp: 220,
+    hrMax: 185,
+    frame: 'climb',
+    wheels: 'c40',
+    kit: { aeroHelmet: false, highSocks: true, overshoes: false },
+    jerseyColor: '#e4572e',
+    jerseyColor2: '#1d3557',
+    helmetColor: '#f1faee',
+    lang: 'fr',
+    quality: 'medium',
+    trainerDifficulty: 1,
+    configured: false,
+  };
+}
+
+function fresh(): SaveData {
+  return { version: 1, profile: defaultProfile(), history: [], xp: 0 };
+}
+
+/** Complète un objet lu (éventuellement ancien ou incomplet) avec les valeurs par défaut. */
+function normalize(raw: unknown): SaveData {
+  const base = fresh();
+  if (!raw || typeof raw !== 'object') return base;
+  const r = raw as Partial<SaveData>;
+  return {
+    version: 1,
+    profile: { ...base.profile, ...(r.profile ?? {}), kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) } },
+    history: Array.isArray(r.history) ? r.history : [],
+    xp: typeof r.xp === 'number' ? r.xp : 0,
+  };
+}
+
+export function loadSave(): SaveData {
+  try {
+    const s = localStorage.getItem(KEY);
+    return s ? normalize(JSON.parse(s)) : fresh();
+  } catch {
+    return fresh();
+  }
+}
+
+export function writeSave(data: SaveData): boolean {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(data));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Contenu du fichier de sauvegarde à télécharger. */
+export function exportBackup(data: SaveData): string {
+  return JSON.stringify({ app: 'simulateur-cyclisme', exportedAt: new Date().toISOString(), ...data }, null, 2);
+}
+
+/** Lecture d'un fichier de sauvegarde ; lève une erreur si le fichier n'est pas reconnu. */
+export function importBackup(text: string): SaveData {
+  const parsed = JSON.parse(text) as { app?: string };
+  if (parsed.app !== 'simulateur-cyclisme') throw new Error('backup-invalid');
+  return normalize(parsed);
+}
