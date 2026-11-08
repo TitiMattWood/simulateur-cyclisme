@@ -87,18 +87,6 @@ function stretchBack<T extends THREE.BufferGeometry>(g: T, k: number): T {
 }
 
 const G = {
-  thigh: keep(lathe(THIGH)),
-  shortsLeg: keep(lathe(THIGH, 0, 0.8, 1.07)),
-  calf: keep(lathe(CALF)),
-  sockHigh: keep(lathe(CALF, 0.45, 1, 1.07)),
-  sockMid: keep(lathe(CALF, 0.7, 1, 1.07)),
-  sockLow: keep(lathe(CALF, 0.86, 1, 1.08)),
-  overshoe: keep(lathe(CALF, 0.82, 1, 1.15)),
-  upperArm: keep(lathe(UPPER_ARM)),
-  sleeveShort: keep(lathe(UPPER_ARM, 0, 0.55, 1.12)),
-  sleeveUpper: keep(lathe(UPPER_ARM, 0, 1, 1.1)),
-  forearm: keep(lathe(FOREARM)),
-  sleeveFore: keep(lathe(FOREARM, 0, 1, 1.1)),
   /** demi-sphère (calotte) pour les casques */
   dome: keep(new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2)),
   /** coque de casque CLM à queue courte : axe X, avant en +X, arrière tronqué en −X */
@@ -425,6 +413,255 @@ function sleeveTexture(base: string, cuff: string | null, hoop: string | null): 
 }
 
 // ---------------------------------------------------------------------------
+// Membres souples : une seule surface continue de la hanche à la cheville (ou de l'épaule
+// à la main), qui se plie en douceur au genou / au coude. Plus d'articulations « en boule ».
+
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+/** Chemin hanche → genou → cheville, arrondi autour de l'articulation. */
+class LimbPath {
+  private a = new THREE.Vector3();
+  private b = new THREE.Vector3();
+  private c = new THREE.Vector3();
+  l1 = 1;
+  l2 = 1;
+  private blend = 0.05;
+  private p0 = new THREE.Vector3();
+  private p2 = new THREE.Vector3();
+  private tmp = new THREE.Vector3();
+
+  set(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): this {
+    this.a.copy(a);
+    this.b.copy(b);
+    this.c.copy(c);
+    this.l1 = a.distanceTo(b) || 1e-4;
+    this.l2 = b.distanceTo(c) || 1e-4;
+    this.blend = Math.min(0.06, 0.35 * Math.min(this.l1, this.l2));
+    this.p0.copy(b).lerp(a, this.blend / this.l1);
+    this.p2.copy(b).lerp(c, this.blend / this.l2);
+    return this;
+  }
+
+  get length(): number {
+    return this.l1 + this.l2;
+  }
+
+  /** Point à la distance d le long du membre. */
+  point(d: number, out: THREE.Vector3): THREE.Vector3 {
+    const w = this.blend;
+    if (d < this.l1 - w) return out.copy(this.a).lerp(this.b, Math.max(0, d) / this.l1);
+    if (d > this.l1 + w) return out.copy(this.b).lerp(this.c, Math.min(this.l2, d - this.l1) / this.l2);
+    const t = (d - (this.l1 - w)) / (2 * w), u = 1 - t;
+    return out.set(0, 0, 0).addScaledVector(this.p0, u * u).addScaledVector(this.b, 2 * u * t).addScaledVector(this.p2, t * t);
+  }
+
+  /** Centre et direction « avant » (perpendiculaire au membre, dans le plan du vélo). */
+  frame(d: number, center: THREE.Vector3, front: THREE.Vector3): void {
+    this.point(d, center);
+    const e = 0.004;
+    this.point(d + e, this.tmp).sub(this.point(d - e, front));
+    const t = this.tmp.normalize();
+    front.set(-t.y, t.x, 0).normalize();
+  }
+}
+
+/** Surface tubulaire dont les anneaux sont recalculés à chaque image. */
+class FlexTube {
+  readonly mesh: THREE.Mesh;
+  private pos: THREE.BufferAttribute;
+  private c = new THREE.Vector3();
+  private f = new THREE.Vector3();
+
+  constructor(material: THREE.Material, private rings: number, private segs = 14) {
+    const n = (rings + 1) * (segs + 1);
+    const g = new THREE.BufferGeometry();
+    this.pos = new THREE.BufferAttribute(new Float32Array(n * 3), 3);
+    this.pos.setUsage(THREE.DynamicDrawUsage);
+    const uv = new Float32Array(n * 2);
+    const idx: number[] = [];
+    for (let i = 0; i <= rings; i++) {
+      for (let j = 0; j <= segs; j++) {
+        const k = i * (segs + 1) + j;
+        uv[2 * k] = j / segs;
+        uv[2 * k + 1] = i / rings;
+      }
+    }
+    for (let i = 0; i < rings; i++) {
+      for (let j = 0; j < segs; j++) {
+        const a = i * (segs + 1) + j, b = a + segs + 1;
+        idx.push(a, a + 1, b, b, a + 1, b + 1);
+      }
+    }
+    g.setAttribute('position', this.pos);
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, material);
+    this.mesh.frustumCulled = false;
+  }
+
+  /**
+   * Recalcule la surface entre les distances d0 et d1 du chemin.
+   * radius(d) : rayon ; shift(d) : décalage vers l'avant (+) ou l'arrière (−), pour la rotule ou le mollet.
+   */
+  update(path: LimbPath, d0: number, d1: number, radius: (d: number) => number, shift: (d: number) => number, scale = 1): void {
+    const arr = this.pos.array as Float32Array;
+    for (let i = 0; i <= this.rings; i++) {
+      const d = d0 + ((d1 - d0) * i) / this.rings;
+      path.frame(d, this.c, this.f);
+      const r = radius(d) * scale;
+      const sh = shift(d);
+      for (let j = 0; j <= this.segs; j++) {
+        const phi = (j / this.segs) * Math.PI * 2;
+        const cf = sh + r * Math.cos(phi), cz = r * Math.sin(phi);
+        const k = 3 * (i * (this.segs + 1) + j);
+        arr[k] = this.c.x + this.f.x * cf + Z_AXIS.x * cz;
+        arr[k + 1] = this.c.y + this.f.y * cf + Z_AXIS.y * cz;
+        arr[k + 2] = this.c.z + this.f.z * cf + Z_AXIS.z * cz;
+      }
+    }
+    this.pos.needsUpdate = true;
+    this.mesh.geometry.computeVertexNormals();
+  }
+}
+
+const bump = (x: number, at: number, width: number) => Math.exp(-((x - at) * (x - at)) / (width * width));
+
+// ---------------------------------------------------------------------------
+// Cheveux et barbe : calottes qui épousent la tête (coordonnées d'une sphère unité,
+// mise ensuite à l'échelle de la tête). θ = angle depuis le sommet, φ = 0 vers l'avant.
+
+/** Portion de sphère entre φ0 et φ1, et pour chaque φ entre θa(φ) et θb(φ), de rayon r(θ, φ). */
+function shellPatch(
+  phi0: number, phi1: number,
+  thA: (phi: number) => number, thB: (phi: number) => number,
+  r: (theta: number, phi: number) => number,
+  nPhi = 48, nTheta = 18,
+): THREE.BufferGeometry {
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (let j = 0; j <= nPhi; j++) {
+    const phi = phi0 + ((phi1 - phi0) * j) / nPhi;
+    const a = thA(phi), b = thB(phi);
+    for (let i = 0; i <= nTheta; i++) {
+      const th = a + ((b - a) * i) / nTheta;
+      const rr = r(th, phi);
+      pos.push(rr * Math.sin(th) * Math.cos(phi), rr * Math.cos(th), rr * Math.sin(th) * Math.sin(phi));
+      uv.push(j / nPhi, 1 - i / nTheta);
+    }
+  }
+  for (let j = 0; j < nPhi; j++) {
+    for (let i = 0; i < nTheta; i++) {
+      const a = j * (nTheta + 1) + i, b = a + nTheta + 1;
+      idx.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Ligne des cheveux : haute sur le front, au-dessus des oreilles, basse sur la nuque. */
+function hairline(phi: number, long: boolean): number {
+  const c = Math.cos(phi);
+  const front = Math.max(0, c), back = Math.max(0, -c);
+  const sideburn = 0.07 * Math.PI * bump(Math.abs(phi), 1.05, 0.22);
+  return 0.5 * Math.PI - 0.17 * Math.PI * Math.pow(front, 0.7) + (long ? 0.42 : 0.24) * Math.PI * Math.pow(back, 1.3) + sideburn;
+}
+
+function hairGeometry(style: 'short' | 'long' | 'ponytail'): THREE.BufferGeometry {
+  const long = style === 'long';
+  return shellPatch(-Math.PI, Math.PI, () => 0, (phi) => hairline(phi, long), (th, phi) => {
+    const back = Math.max(0, -Math.cos(phi));
+    // volume un peu plus marqué à l'arrière ; cheveux longs : ils s'écartent et tombent sur la nuque
+    return 1.04 + 0.02 * back + (long ? 0.55 * back * Math.max(0, th - 0.62 * Math.PI) : 0);
+  }, 64, 20);
+}
+
+/** Barbe : des favoris jusqu'au menton ; plus épaisse vers le bas pour une barbe fournie. */
+function beardGeometry(full: boolean): THREE.BufferGeometry {
+  const pm = 1.72;
+  const top = (phi: number) => 0.5 * Math.PI + 0.135 * Math.PI * Math.pow(Math.cos((phi / pm) * Math.PI / 2), 2);
+  const bottom = (phi: number) => 0.7 * Math.PI + 0.19 * Math.PI * Math.pow(Math.max(0, Math.cos(phi)), 1.2);
+  return shellPatch(-pm, pm, top, bottom, (th, phi) => {
+    const k = (th - top(phi)) / Math.max(0.01, bottom(phi) - top(phi));
+    return full ? 1.025 + 0.075 * Math.pow(k, 0.8) * Math.max(0.3, Math.cos(phi)) : 1.012;
+  }, 40, 12);
+}
+
+/** Petit générateur pseudo-aléatoire stable (mêmes mèches à chaque redessin). */
+function seeded(seed: number): () => number {
+  let x = seed;
+  return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 4294967296);
+}
+
+/** Texture de cheveux : mèches claires et sombres, bord inférieur irrégulier (découpé en transparence). */
+function hairTexture(color: string): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 128);
+  const base = new THREE.Color(color);
+  g.fillStyle = color;
+  g.fillRect(0, 0, 256, 128);
+  const rnd = seeded(7);
+  for (let k = 0; k < 520; k++) {
+    const x = rnd() * 256, l = 30 + rnd() * 90;
+    const shade = base.clone().offsetHSL(0, 0, (rnd() - 0.5) * 0.18);
+    g.strokeStyle = `#${shade.getHexString()}`;
+    g.globalAlpha = 0.55;
+    g.lineWidth = 1 + rnd() * 1.5;
+    g.beginPath();
+    g.moveTo(x, 128 - rnd() * 20);
+    g.quadraticCurveTo(x + (rnd() - 0.5) * 10, 128 - l / 2, x + (rnd() - 0.5) * 6, 128 - l);
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+  // bord (v proche de 0 = bas de l'image) : pointes irrégulières
+  g.globalCompositeOperation = 'destination-out';
+  for (let x = 0; x < 256; x += 3) {
+    const h = 2 + rnd() * 9;
+    g.fillRect(x, 128 - h, 3, h);
+  }
+  g.globalCompositeOperation = 'source-over';
+  const t = toTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+
+/** Barbe de 3 jours : poils courts piquetés, plus denses vers le menton, fondus vers les joues. */
+function stubbleTexture(color: string): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 128);
+  const rnd = seeded(11);
+  g.fillStyle = color;
+  for (let k = 0; k < 5200; k++) {
+    const x = rnd() * 256, y = rnd() * 128;
+    // haut de l'image = haut de la barbe (joues) : moins dense
+    if (rnd() > Math.min(1, 0.25 + (y / 128) * 1.1)) continue;
+    g.globalAlpha = 0.35 + rnd() * 0.45;
+    g.fillRect(x, y, 1.3, 1.3);
+  }
+  g.globalAlpha = 1;
+  return toTexture(c);
+}
+
+/** Tube effilé le long d'une courbe (queue-de-cheval, moustache). */
+function taperTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, rings = 20, segs = 10): THREE.BufferGeometry {
+  const g = new THREE.TubeGeometry(curve, rings, 1, segs, false);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i <= rings; i++) {
+    const t = i / rings;
+    const c = curve.getPointAt(t);
+    const r = r0 + (r1 - r0) * t;
+    for (let j = 0; j <= segs; j++) {
+      const k = i * (segs + 1) + j;
+      const v = new THREE.Vector3(pos.getX(k), pos.getY(k), pos.getZ(k)).sub(c);
+      pos.setXYZ(k, c.x + v.x * r, c.y + v.y * r, c.z + v.z * r);
+    }
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// ---------------------------------------------------------------------------
 
 export class RiderModel {
   readonly root = new THREE.Group();
@@ -439,7 +676,9 @@ export class RiderModel {
 
   private wheels: THREE.Group[] = [];
   private crank = new THREE.Group();
-  private legs: Array<{ side: number; thigh: THREE.Mesh[]; calf: THREE.Mesh[]; knee: THREE.Mesh; ankle: THREE.Mesh; foot: THREE.Group }> = [];
+  private legs: Array<{ side: number; path: LimbPath; skin: FlexTube; shorts: FlexTube; sock: FlexTube; overshoe: FlexTube | null; ankle: THREE.Mesh; foot: THREE.Group }> = [];
+  /** début de la chaussette, en fraction du tibia */
+  private sockFrom = 0.45;
   private hip: THREE.Vector3;
   private bb: THREE.Vector3;
   private thighLen: number;
@@ -502,7 +741,6 @@ export class RiderModel {
     const sleeveBase = look.pattern === 'shoulders' ? look.jerseyColor2 : look.jerseyColor;
     const sleeveHoop = look.pattern === 'hoops' ? look.jerseyColor2 : null;
     const mSleeveCuff = lam('#ffffff', { map: sleeveTexture(sleeveBase, look.jerseyColor3, sleeveHoop) });
-    const mSleevePlain = lam('#ffffff', { map: sleeveTexture(sleeveBase, null, null) });
     const mShoulder = lam(sleeveBase);
 
     // ----- Vélo
@@ -896,7 +1134,7 @@ export class RiderModel {
     this.crank.add(spider);
     for (const side of [-1, 1]) {
       const arm = new THREE.Mesh(UNIT_CYL, mGroup);
-      place(arm, V(0, 0, side * 0.075), V(0, -CRANK * side, side * 0.085), 0.011, 1.9);
+      place(arm, V(0, 0, side * 0.075), V(0, -CRANK * side, side * 0.085), 0.0085, 1.7);
       this.crank.add(arm);
     }
     bike.add(this.crank);
@@ -988,21 +1226,63 @@ export class RiderModel {
     const ears = [-1, 1].map((side) => blob(mSkin, headC.clone().add(V(-0.005, -0.005, side * 0.08 * hs)), 0.022 * hs, 0.03 * hs, 0.012 * hs));
     this.body.add(head, nose, ...ears);
     this.headParts.push(neck, head, nose, ...ears);
+    /** point de la surface de la tête (θ depuis le sommet, φ = 0 vers l'avant), r = 1 sur la peau */
+    const headScale = V(0.1 * hs, 0.113 * hs, 0.082 * hs);
+    const headPt = (th: number, phi: number, r = 1) =>
+      headC.clone().add(V(Math.sin(th) * Math.cos(phi) * headScale.x * r, Math.cos(th) * headScale.y * r, Math.sin(th) * Math.sin(phi) * headScale.z * r));
+    const onHead = (g: THREE.BufferGeometry, m: THREE.Material) => {
+      const mesh = new THREE.Mesh(g, m);
+      mesh.position.copy(headC);
+      mesh.scale.copy(headScale);
+      return mesh;
+    };
+    // visage : yeux, sourcils, bouche
+    const faceParts: THREE.Mesh[] = [];
+    const mEyeWhite = lam('#f4f1ec'), mIris = lam('#2a1d14'), mLips = lam(new THREE.Color(look.skin).multiplyScalar(0.78));
+    for (const side of [-1, 1]) {
+      const phi = side * 0.37;
+      const e = blob(mEyeWhite, headPt(0.475 * Math.PI, phi, 0.97), 0.008 * hs, 0.0068 * hs, 0.0115 * hs);
+      e.rotation.y = -phi;
+      // iris + pupille, posés devant le blanc de l'œil, regard droit devant
+      const iris = blob(mIris, headPt(0.475 * Math.PI, phi, 0.97).add(V(0.0075 * hs, 0)), 0.0025 * hs, 0.0058 * hs, 0.0058 * hs);
+      const brow = blob(mHair, headPt(0.41 * Math.PI, phi, 1.005), 0.005 * hs, 0.0035 * hs, 0.019 * hs);
+      brow.rotation.y = -phi;
+      brow.rotation.x = side * 0.12;
+      faceParts.push(e, iris, brow);
+    }
+    faceParts.push(blob(mLips, headPt(0.635 * Math.PI, 0, 0.985), 0.006 * hs, 0.0045 * hs, 0.022 * hs));
+    this.body.add(...faceParts);
+    this.headParts.push(...faceParts);
+
     // cheveux et barbe
     const hairParts: THREE.Mesh[] = [];
+    const mHairTex = lam('#ffffff', { map: hairTexture(look.hairColor), alphaTest: 0.5, side: THREE.DoubleSide });
     if (look.hair !== 'bald') {
-      hairParts.push(blob(mHair, headC.clone().add(V(-0.028 * hs, 0.012 * hs)), 0.092 * hs, 0.108 * hs, 0.087 * hs));
-      if (look.hair === 'long') hairParts.push(blob(mHair, headC.clone().add(V(-0.075 * hs, -0.085 * hs)), 0.055 * hs, 0.1 * hs, 0.08 * hs));
+      hairParts.push(onHead(hairGeometry(look.hair), mHairTex));
       if (look.hair === 'ponytail') {
-        const tail = blob(mHair, headC.clone().add(V(-0.135 * hs, -0.04 * hs)), 0.06 * hs, 0.026 * hs, 0.026 * hs);
-        tail.rotation.z = 0.7;
-        hairParts.push(tail);
+        // queue-de-cheval qui sort sous le casque et retombe sur la nuque
+        const p0 = headPt(0.6 * Math.PI, Math.PI, 1.02);
+        const curve = new THREE.CatmullRomCurve3([
+          p0, p0.clone().add(V(-0.045 * hs, -0.01 * hs)), p0.clone().add(V(-0.085 * hs, -0.06 * hs)), p0.clone().add(V(-0.095 * hs, -0.13 * hs)),
+        ]);
+        hairParts.push(new THREE.Mesh(taperTube(curve, 0.022 * hs, 0.006 * hs), mHairTex));
+        const tie = new THREE.Mesh(new THREE.TorusGeometry(0.02 * hs, 0.005 * hs, 6, 16), mHelmetDark);
+        tie.position.copy(p0.clone().add(V(-0.012 * hs, -0.002 * hs)));
+        tie.rotation.y = Math.PI / 2;
+        hairParts.push(tie);
       }
     }
     if (look.beard !== 'none') {
-      const mBeard = look.beard === 'full' ? mHair : lam(new THREE.Color(look.skin).lerp(new THREE.Color(look.hairColor), 0.45));
-      const k = look.beard === 'full' ? 1.07 : 1.015;
-      hairParts.push(blob(mBeard, headC.clone().add(V(0.02 * hs, -0.058 * hs)), 0.085 * hs * k, 0.06 * hs * k, 0.08 * hs * k));
+      const full = look.beard === 'full';
+      const mBeard = full
+        ? mHairTex
+        : lam('#ffffff', { map: stubbleTexture(look.hairColor), transparent: true, depthWrite: false });
+      hairParts.push(onHead(beardGeometry(full), mBeard));
+      if (full) {
+        // moustache qui rejoint la barbe aux commissures
+        const pts = [-0.62, -0.3, 0, 0.3, 0.62].map((phi) => headPt(0.6 * Math.PI + 0.05 * Math.PI * Math.abs(phi), phi, 1.035));
+        hairParts.push(new THREE.Mesh(taperTube(new THREE.CatmullRomCurve3(pts), 0.009 * hs, 0.006 * hs, 16, 8), mHair));
+      }
     }
     this.body.add(...hairParts);
     this.headParts.push(...hairParts);
@@ -1086,7 +1366,7 @@ export class RiderModel {
     this.body.add(...helmetParts);
     this.headParts.push(...helmetParts);
 
-    // bras
+    // bras : surface continue épaule → coude → main, manche par-dessus
     const longSleeves = look.sleeves === 'long';
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? -1 : 1;
@@ -1095,22 +1375,15 @@ export class RiderModel {
       const elbow = elbows[i] ?? solve2(sh, hand, upperArm, foreArm, -1).setZ(side * 0.235 * s);
       const ur = 0.046 * s * wm, fr = 0.038 * s * wm;
       this.body.add(blob(mShoulder, sh, 0.062 * s * wm, 0.06 * s * wm, 0.058 * s * wm)); // épaule
-      const up = new THREE.Mesh(G.upperArm, mSkin);
-      place(up, sh, elbow, ur);
-      this.body.add(up);
-      const sleeve = new THREE.Mesh(longSleeves ? G.sleeveUpper : G.sleeveShort, longSleeves ? mSleevePlain : mSleeveCuff);
-      place(sleeve, sh, elbow, ur);
-      this.body.add(sleeve);
-      this.body.add(blob(longSleeves ? mSleevePlain : mSkin, elbow, fr * 1.05, fr * 1.05, fr * 1.05)); // coude
-      if (longSleeves) {
-        const fs = new THREE.Mesh(G.sleeveFore, mSleeveCuff);
-        place(fs, elbow, hand, fr);
-        this.body.add(fs);
-      } else {
-        const fa = new THREE.Mesh(G.forearm, mSkin);
-        place(fa, elbow, hand, fr);
-        this.body.add(fa);
-      }
+      const path = new LimbPath().set(sh, elbow, hand);
+      const L1 = path.l1, L = path.length;
+      const radius = (d: number) => (d < L1 ? ur * rAt(UPPER_ARM, d / L1) : fr * rAt(FOREARM, (d - L1) / path.l2));
+      const shift = (d: number) => (d < L1 ? 0.12 * ur * bump(d / L1, 0.45, 0.25) : 0);
+      const skin = new FlexTube(mSkin, 22, 12);
+      skin.update(path, 0, L - 0.01, radius, shift);
+      const sleeve = new FlexTube(mSleeveCuff, 12, 12);
+      sleeve.update(path, 0, longSleeves ? L - 0.03 : 0.55 * L1, radius, shift, 1.1);
+      this.body.add(skin.mesh, sleeve.mesh);
       // main (gant) et doigts
       const mHand = look.gloves === 'none' ? mSkin : mGlove;
       this.body.add(blob(mHand, hand.clone().add(V(0.012, 0.0)), 0.048 * s, 0.03 * s, 0.035 * s));
@@ -1118,15 +1391,15 @@ export class RiderModel {
       this.body.add(fingers);
     }
 
-    // jambes (mises à jour à chaque image)
-    const sockGeo = look.sockHeight === 'high' ? G.sockHigh : look.sockHeight === 'mid' ? G.sockMid : G.sockLow;
+    // jambes (mises à jour à chaque image) : surface continue, cuissard et chaussettes par-dessus
+    this.sockFrom = look.sockHeight === 'high' ? 0.45 : look.sockHeight === 'mid' ? 0.7 : 0.86;
+    mShorts.side = THREE.DoubleSide;
+    mSock.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
-      const thighSkin = new THREE.Mesh(G.thigh, mSkin);
-      const thighShorts = new THREE.Mesh(G.shortsLeg, mShorts);
-      const calfSkin = new THREE.Mesh(G.calf, mSkin);
-      const calfParts: THREE.Mesh[] = [calfSkin, new THREE.Mesh(sockGeo, mSock)];
-      if (look.overshoes) calfParts.push(new THREE.Mesh(G.overshoe, mShoe));
-      const knee = blob(mSkin, V(0, 0), 1, 1, 1);
+      const skin = new FlexTube(mSkin, 34, 16);
+      const shorts = new FlexTube(mShorts, 14, 16);
+      const sock = new FlexTube(mSock, 12, 16);
+      const overshoe = look.overshoes ? new FlexTube(mShoe, 6, 16) : null;
       const ankle = blob(look.overshoes ? mShoe : mSock, V(0, 0), 1, 1, 1);
       // chaussure : repère local centré sur l'axe de la pédale
       const foot = new THREE.Group();
@@ -1143,9 +1416,10 @@ export class RiderModel {
           foot.add(d);
         }
       }
-      foot.add(box(mBlack, V(0, -0.008), 0.08, 0.014, 0.07)); // pédale
-      this.body.add(thighSkin, thighShorts, ...calfParts, knee, ankle, foot);
-      this.legs.push({ side, thigh: [thighSkin, thighShorts], calf: calfParts, knee, ankle, foot });
+      foot.add(box(mBlack, V(0.005, -0.006), 0.085, 0.01, 0.06)); // pédale
+      this.body.add(skin.mesh, shorts.mesh, sock.mesh, ankle, foot);
+      if (overshoe) this.body.add(overshoe.mesh);
+      this.legs.push({ side, path: new LimbPath(), skin, shorts, sock, overshoe, ankle, foot });
     }
 
     // repères pour les caméras
@@ -1203,10 +1477,20 @@ export class RiderModel {
       const hip = V(this.hip.x, this.hip.y, leg.side * 0.095 * s * wm);
       const knee = solve2(hip, ankle, this.thighLen, this.shinLen, 1);
       knee.z = leg.side * 0.105 * s * wm;
-      for (const m of leg.thigh) place(m, hip, knee, 0.074 * s * wm);
-      for (const m of leg.calf) place(m, knee, ankle, 0.057 * s * wm);
-      leg.knee.position.copy(knee);
-      leg.knee.scale.setScalar(0.05 * s * wm);
+      const path = leg.path.set(hip, knee, ankle);
+      const L1 = path.l1, L2 = path.l2, L = path.length;
+      const Rt = 0.074 * s * wm, Rc = 0.057 * s * wm;
+      // rayon anatomique : cuisse qui s'affine, genou, mollet bombé, cheville fine
+      const radius = (d: number) => (d < L1 ? Rt * rAt(THIGH, d / L1) : Rc * rAt(CALF, (d - L1) / L2));
+      // décalage : quadriceps et rotule vers l'avant, mollet vers l'arrière
+      const shift = (d: number) =>
+        d < L1
+          ? 0.1 * Rt * bump(d / L1, 0.45, 0.25) + 0.22 * Rc * bump(d - L1, 0, 0.03)
+          : 0.22 * Rc * bump(d - L1, 0, 0.03) - 0.24 * Rc * bump((d - L1) / L2, 0.28, 0.16);
+      leg.skin.update(path, 0, L, radius, shift);
+      leg.shorts.update(path, 0, 0.8 * L1, radius, shift, 1.06);
+      leg.sock.update(path, L1 + this.sockFrom * L2, L, radius, shift, 1.07);
+      leg.overshoe?.update(path, L1 + 0.82 * L2, L, radius, shift, 1.15);
       leg.ankle.position.copy(ankle);
       leg.ankle.scale.setScalar(0.031 * s);
       leg.foot.position.copy(pedal);
