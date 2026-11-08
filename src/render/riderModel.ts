@@ -70,21 +70,6 @@ const CALF: Array<[number, number]> = [[0, 0.74], [0.12, 0.88], [0.3, 1], [0.55,
 const UPPER_ARM: Array<[number, number]> = [[0, 1], [0.4, 0.96], [1, 0.76]];
 const FOREARM: Array<[number, number]> = [[0, 0.92], [0.28, 1], [1, 0.6]];
 
-/**
- * Coque de casque CLM : volume de révolution autour de X (avant en +X), ouvert dessous
- * pour laisser le visage dégagé sous la visière.
- */
-function ttShellGeometry(): THREE.BufferGeometry {
-  const ctrl: Array<[number, number]> = [[0, 0.42], [0.25, 0.7], [0.55, 0.95], [0.78, 1], [0.93, 0.8], [1, 0.25]];
-  const pts: THREE.Vector2[] = [];
-  for (let k = 0; k < 16; k++) {
-    const y = k / 15;
-    pts.push(new THREE.Vector2(rAt(ctrl, y), y));
-  }
-  // demi-tour centré sur le dessus (+ un peu sur les côtés), puis axe Y → axe X
-  return new THREE.LatheGeometry(pts, 26, Math.PI * 0.875, Math.PI * 1.25).rotateZ(-Math.PI / 2);
-}
-
 /** Étire l'arrière (x < 0) d'une calotte : l'arrière s'allonge et descend, sans cassure. */
 function stretchBack<T extends THREE.BufferGeometry>(g: T, k: number): T {
   const pos = g.attributes.position as THREE.BufferAttribute;
@@ -117,7 +102,9 @@ const G = {
   /** demi-sphère (calotte) pour les casques */
   dome: keep(new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2)),
   /** coque de casque CLM à queue courte : axe X, avant en +X, arrière tronqué en −X */
-  ttShell: keep(ttShellGeometry()),
+  /** coque de casque CLM : calotte très étirée vers l'arrière (queue courte) */
+  ttShell: keep(stretchBack(new THREE.SphereGeometry(1, 44, 20, 0, Math.PI * 2, 0, Math.PI * 0.62), 1.15)),
+  ttEdge: keep(stretchBack(new THREE.SphereGeometry(1.015, 44, 2, 0, Math.PI * 2, Math.PI * 0.575, Math.PI * 0.045), 1.15)),
   /** coque de casque route : calotte qui descend sous l'équateur (couvre la nuque et les tempes) */
   helmetShell: keep(new THREE.SphereGeometry(1, 40, 18, 0, Math.PI * 2, 0, Math.PI * 0.6)),
   /** liseré inférieur de la coque */
@@ -521,9 +508,25 @@ export class RiderModel {
     // ----- Vélo
     const bike = new THREE.Group();
     const R = geo.R;
-    const rear = V(0, R), front = V(geo.wheelbase, R);
+    const rear = V(0, R);
     const bb = (this.bb = V(geo.bb[0], geo.bb[1]));
-    const seatTop = V(...geo.seatTop), headTop = V(...geo.headTop), headBot = V(...geo.headBot);
+    const seatTop = V(...geo.seatTop);
+    let headTop = V(...geo.headTop), headBot = V(...geo.headBot);
+    let front = V(geo.wheelbase, R);
+    if (!geo.suspension) {
+      // Fourche de longueur réaliste (axe → té) : la roue garde du jeu sous le tube diagonal.
+      // On garde l'angle et la longueur de douille, on remonte la douille, la roue avance d'autant.
+      const axis = new THREE.Vector3().subVectors(headTop, headBot);
+      const headLen = axis.length();
+      axis.normalize();
+      const fwd = V(axis.y, -axis.x);
+      const a2c = R + (geo.tire > 0.018 ? 0.05 : 0.04);
+      const offset = 0.045;
+      headBot = V(headBot.x, R + a2c * axis.y - offset * fwd.y);
+      headTop = headBot.clone().addScaledVector(axis, headLen);
+      front = V(headBot.x - a2c * axis.x + offset * fwd.x, R);
+    }
+    const wheelbase = front.x;
     const tube = (mat: THREE.Material, a: THREE.Vector3, b: THREE.Vector3, r: number, depth = 1) => {
       const m = new THREE.Mesh(UNIT_CYL, mat);
       place(m, a, b, r, depth);
@@ -878,7 +881,7 @@ export class RiderModel {
     }
     // étriers de frein
     bike.add(box(mBlack, V(0.06, R + 0.05, -0.07), 0.05, 0.03, 0.02));
-    bike.add(box(mBlack, V(geo.wheelbase - 0.07, R + 0.04, -0.07), 0.05, 0.03, 0.02));
+    bike.add(box(mBlack, V(wheelbase - 0.07, R + 0.04, -0.07), 0.05, 0.03, 0.02));
 
     // ----- Transmission
     this.crank.position.copy(bb);
@@ -957,7 +960,7 @@ export class RiderModel {
       foot(V(-0.24, 0.03, 0), V(0.24, 0.03, 0));
       foot(V(0, 0.03, -0.03), V(0, R - 0.1, -0.03));
       // cale de roue avant
-      this.body.add(box(mTrainer, V(geo.wheelbase, 0.015, 0), 0.32, 0.03, 0.16));
+      this.body.add(box(mTrainer, V(wheelbase, 0.015, 0), 0.32, 0.03, 0.16));
     }
 
     // ----- Cycliste
@@ -1018,19 +1021,18 @@ export class RiderModel {
       shell.add(m);
     };
     if (look.helmetType === 'tt') {
-      const shell = new THREE.Mesh(G.ttShell, mHelmet);
-      shell.scale.set(0.31 * hs, 0.125 * hs, 0.112 * hs);
-      shell.position.copy(headC).add(V(-0.17 * hs, 0.03 * hs));
-      shell.rotation.z = 0.12 + (ta - 0.25) * 0.4;
+      // TT5 : coque lisse à queue courte, posée à plat dans l'axe du dos, visière enveloppante
+      const shell = new THREE.Group();
+      shell.position.copy(headC).add(V(-0.014 * hs, 0.042 * hs));
+      shell.scale.set(0.148 * hs, 0.104 * hs, 0.112 * hs);
+      shell.rotation.z = 0.12 + Math.max(0, ta - 0.2) * 0.6;
+      shell.add(new THREE.Mesh(G.ttShell, mHelmet), new THREE.Mesh(G.ttEdge, mHelmetDark));
+      for (const z of [-0.22, 0.22]) vent(shell, 0.82, z, 0.09, 0.08); // prises d'air frontales
+      vent(shell, -0.9, 0, 0.18, 0.12); // sortie d'air arrière
       helmetParts.push(shell);
-      // bandeau sombre à l'arrière et deux prises d'air frontales
-      const back = blob(mHelmetDark, headC.clone().add(V(-0.16 * hs, 0.02 * hs)), 0.012 * hs, 0.06 * hs, 0.075 * hs);
-      helmetParts.push(back);
-      for (const side of [-1, 1]) helmetParts.push(blob(mVent, headC.clone().add(V(0.11 * hs, 0.065 * hs, side * 0.03 * hs)), 0.012 * hs, 0.009 * hs, 0.016 * hs));
-      // visière enveloppante aimantée
       const visor = new THREE.Mesh(G.lens, mLens);
-      visor.scale.set(0.108 * hs, 0.075 * hs, 0.108 * hs);
-      visor.position.copy(headC).add(V(0.006 * hs, 0.004 * hs));
+      visor.scale.set(0.106 * hs, 0.072 * hs, 0.106 * hs);
+      visor.position.copy(headC).add(V(0.008 * hs, 0.002 * hs));
       helmetParts.push(visor);
     } else {
       const aero = look.helmetType === 'aero';
@@ -1154,7 +1156,7 @@ export class RiderModel {
     const mShadow = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false });
     own.push(mShadow);
     this.shadow = new THREE.Mesh(new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2).scale(0.85, 1, 0.32), mShadow);
-    this.shadow.position.set(geo.wheelbase / 2, 0.03, 0);
+    this.shadow.position.set(wheelbase / 2, 0.03, 0);
     this.shadow.visible = !opts.trainer;
     this.root.add(this.shadow);
 
