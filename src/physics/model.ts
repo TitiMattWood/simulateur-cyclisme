@@ -51,7 +51,7 @@ export function buildParams(s: RiderSetup): PhysicsParams {
   return {
     mass: s.weightKg + bike,
     // jantes + pneus ≈ 1,6 kg de masse « tournante » ; plus lourd pour un VTT
-    inertiaMass: s.frame === 'mtb' ? 2.4 : 1.6 + wheels.massDelta * 0.6,
+    inertiaMass: s.frame === 'mtb' ? 2.4 : s.frame === 'gravel' ? 2.0 : 1.6 + wheels.massDelta * 0.6,
     cda,
     frame: s.frame,
     drivetrain: 0.976,

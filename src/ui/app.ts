@@ -4,7 +4,7 @@
  */
 import { Engine } from '../render/engine';
 import { HomeScene } from '../render/homeScene';
-import type { RiderLook } from '../render/riderModel';
+import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance } from '../render/look';
 import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
@@ -59,6 +59,10 @@ export class App {
   private searchResults: FreeStart[] = [];
   private ride: RideView | null = null;
   private message = '';
+  /** sections du profil dépliées */
+  private pfOpen = new Set<string>(['rider', 'kit', 'bike']);
+  /** vrai pendant l'animation d'entrée dans la TV */
+  private entering = false;
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.ui = ui;
@@ -81,11 +85,7 @@ export class App {
   }
 
   private look(): RiderLook {
-    const p = this.profile;
-    return {
-      heightCm: p.heightCm, frame: p.frame, wheels: p.wheels, jerseyColor: p.jerseyColor,
-      jerseyColor2: p.jerseyColor2, helmetColor: p.helmetColor, highSocks: p.kit.highSocks, aeroHelmet: p.kit.aeroHelmet,
-    };
+    return lookFromProfile(this.profile);
   }
 
   // -------------------------------------------------------------------------
@@ -114,12 +114,15 @@ export class App {
       </div>`;
     this.ui.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
       b.addEventListener('click', () => {
+        // on quitte le profil sans enregistrer : l'avatar reprend l'apparence enregistrée
+        if (this.tab === 'profile') this.home.setLook(this.look());
         this.tab = b.dataset.tab as Tab;
         this.message = '';
         this.renderHome();
       }),
     );
     this.bindTab();
+    this.home.setFocus(this.tab === 'profile' ? 'rider' : 'room');
   }
 
   private renderTab(): string {
@@ -303,63 +306,129 @@ export class App {
 
   private renderProfileTab(): string {
     const p = this.profile;
+    const a = p.appearance;
     const params = buildParams({ weightKg: p.weightKg, heightCm: p.heightCm, frame: p.frame, wheels: p.wheels, kit: p.kit });
-    const opt = <T extends string>(values: T[], cur: T, label: (v: T) => string) =>
-      values.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${label(v)}</option>`).join('');
+    const opt = <T extends string | number>(values: readonly T[], cur: T, label: (v: T) => string) =>
+      values.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${escapeHtml(label(v))}</option>`).join('');
+    const sel = <T extends string | number>(id: string, label: I18nKey, values: readonly T[], cur: T, lbl: (v: T) => string) =>
+      `<label>${t(label)}<select id="${id}">${opt(values, cur, lbl)}</select></label>`;
     const num = (id: string, label: I18nKey, v: number, min: number, max: number, step = 1) =>
       `<label>${t(label)}<input type="number" id="${id}" value="${v}" min="${min}" max="${max}" step="${step}"></label>`;
+    const color = (id: string, label: I18nKey, v: string) => `<label>${t(label)}<input type="color" id="${id}" value="${v}"></label>`;
+    const check = (id: string, label: I18nKey, v: boolean) => `<label class="check"><input type="checkbox" id="${id}" ${v ? 'checked' : ''}> ${t(label)}</label>`;
+    const swatches = (name: string, label: I18nKey, values: string[], cur: string) => `
+      <div class="swatches"><span>${t(label)}</span><div>${values.map((c) =>
+        `<label class="swatch" style="--c:${c}"><input type="radio" name="${name}" value="${c}" ${c === cur ? 'checked' : ''}></label>`).join('')}</div></div>`;
+    const tr = (prefix: string) => (v: string | number) => t(`${prefix}.${v}` as I18nKey);
+    const section = (id: string, label: I18nKey, body: string) =>
+      `<details class="pf-sec" data-sec="${id}" ${this.pfOpen.has(id) ? 'open' : ''}><summary>${t(label)}</summary><div class="pf-body">${body}</div></details>`;
+
+    const rider = `
+      <label>${t('pf.name')}<input type="text" id="pf-name" value="${escapeHtml(p.name)}" maxlength="30"></label>
+      <div class="grid2">
+        ${num('pf-weight', 'pf.weight', p.weightKg, 30, 200, 0.5)}
+        ${num('pf-height', 'pf.height', p.heightCm, 120, 220)}
+        ${num('pf-ftp', 'pf.ftp', p.ftp, 50, 600)}
+        ${num('pf-hrmax', 'pf.hrmax', p.hrMax, 100, 230)}
+      </div>
+      ${swatches('pf-skin', 'pf.skin', SKIN_TONES, a.skin)}
+      <div class="grid2">
+        ${sel('pf-hair', 'pf.hair', ['short', 'long', 'ponytail', 'bald'] as const, a.hair, tr('hair'))}
+        ${sel('pf-beard', 'pf.beard', ['none', 'stubble', 'full'] as const, a.beard, tr('beard'))}
+      </div>
+      ${swatches('pf-haircolor', 'pf.hairColor', HAIR_COLORS, a.hairColor)}`;
+
+    const kit = `
+      ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
+      <div class="grid3">
+        ${color('pf-j1', 'pf.jersey', p.jerseyColor)}
+        ${color('pf-j2', 'pf.jersey2', p.jerseyColor2)}
+        ${color('pf-j3', 'pf.jersey3', a.jerseyColor3)}
+      </div>
+      <div class="grid3">
+        ${color('pf-shorts', 'pf.shorts', a.shortsColor)}
+        ${sel('pf-sleeves', 'pf.sleeves', ['short', 'long'] as const, a.sleeves, tr('sleeves'))}
+        ${sel('pf-gloves', 'pf.gloves', ['none', 'mitts', 'full'] as const, a.gloves, tr('gloves'))}
+      </div>
+      <div class="grid2">
+        ${sel('pf-helmet', 'pf.helmetType', ['road', 'aero', 'tt'] as const, a.helmetType, tr('helmet'))}
+        ${color('pf-hc', 'pf.helmetColor', p.helmetColor)}
+      </div>
+      <div class="grid2">
+        ${check('pf-glasses', 'pf.glasses', a.glasses)}
+        ${sel('pf-lens', 'pf.lens', ['dark', 'blue', 'red', 'orange', 'clear'] as const, a.lens, tr('lens'))}
+      </div>
+      <div class="grid3">
+        ${color('pf-shoes', 'pf.shoes', a.shoeColor)}
+        ${sel('pf-sockh', 'pf.socks', ['low', 'mid', 'high'] as const, a.sockHeight, tr('socks'))}
+        ${color('pf-sockc', 'pf.sockColor', a.sockColor)}
+      </div>
+      ${check('pf-over', 'pf.overshoes', p.kit.overshoes)}`;
+
+    const bike = `
+      <div class="grid2">
+        ${sel('pf-frame', 'pf.frame', ['climb', 'aero', 'gravel', 'tt', 'mtb'] as const, p.frame, tr('frame'))}
+        ${sel('pf-wheels', 'pf.wheels', ['alu', 'c40', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
+      </div>
+      <div class="grid3">
+        ${color('pf-fc', 'pf.frameColor', a.frameColor)}
+        ${color('pf-fc2', 'pf.frameColor2', a.frameColor2)}
+        ${sel('pf-finish', 'pf.finish', ['gloss', 'matte'] as const, a.finish, tr('finish'))}
+      </div>
+      <div class="grid3">
+        ${sel('pf-group', 'pf.groupset', ['black', 'silver'] as const, a.groupset, tr('group'))}
+        ${color('pf-tape', 'pf.barTape', a.barTape)}
+        ${color('pf-saddle', 'pf.saddle', a.saddleColor)}
+      </div>
+      <div class="grid3">
+        ${sel('pf-tirewall', 'pf.tireWall', ['black', 'tan'] as const, a.tireWall, tr('tire'))}
+        ${sel('pf-bottles', 'pf.bottles', [0, 1, 2] as const, a.bottles, (v) => String(v))}
+        ${color('pf-bottlec', 'pf.bottleColor', a.bottleColor)}
+      </div>
+      ${check('pf-computer', 'pf.computer', a.computer)}
+      ${check('pf-towel', 'pf.towel', a.towel)}`;
+
+    const drive = `
+      <label>${t('pf.difficulty', { v: Math.round(p.trainerDifficulty * 100) })}<input type="range" id="pf-diff" min="0" max="100" step="5" value="${Math.round(p.trainerDifficulty * 100)}"></label>
+      <fieldset><legend>${t('pf.shifting')}</legend>
+        <label class="check"><input type="radio" name="pf-shift" value="virtual" ${p.shifting === 'virtual' ? 'checked' : ''}> ${t('pf.shift.virtual')}</label>
+        <label class="check"><input type="radio" name="pf-shift" value="manual" ${p.shifting === 'manual' ? 'checked' : ''}> ${t('pf.shift.manual')}</label>
+        <h4 class="sub">${t('pf.realSetup')}</h4>
+        <div class="grid2">
+          ${num('pf-ring', 'pf.chainring', p.chainring, 20, 60)}
+          ${num('pf-cog', 'pf.cog', p.cogTeeth, 10, 36)}
+        </div>
+        <p class="hint">${t('pf.cogHint')}</p>
+        <h4 class="sub">${t('pf.virtualSetup')}</h4>
+        <div class="grid3">
+          <label>${t('pf.rings')}<select id="pf-rings">${Object.keys(CHAINRINGS).map((k) => `<option value="${k}" ${k === p.drivetrain.chainrings ? 'selected' : ''}>${CHAINRINGS[k].length > 1 ? `${k} (${t('pf.double')})` : `${k} (${t('pf.single')})`}</option>`).join('')}</select></label>
+          <label>${t('pf.cassette')}<select id="pf-cassette">${Object.keys(CASSETTES).map((k) => `<option value="${k}" ${k === p.drivetrain.cassette ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+          <label>${t('pf.tire')}<select id="pf-tire">${(Object.keys(TIRES) as TireId[]).map((k) => `<option value="${k}" ${k === p.drivetrain.tire ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+        </div>
+        <label class="check"><input type="checkbox" id="pf-seq" ${p.drivetrain.sequential ? 'checked' : ''}> ${t('pf.sequential')}</label>
+        <div class="grid3">
+          <label>${t('pf.keyUp')}<input type="text" readonly class="keycap" id="pf-kup" value="${escapeHtml(p.keyGearUp)}"></label>
+          <label>${t('pf.keyDown')}<input type="text" readonly class="keycap" id="pf-kdown" value="${escapeHtml(p.keyGearDown)}"></label>
+          <label>${t('pf.keyFront')}<input type="text" readonly class="keycap" id="pf-kfront" value="${escapeHtml(p.keyFront)}"></label>
+        </div>
+        <p class="hint">${t('pf.keyHint')}</p>
+      </fieldset>`;
+
+    const display = `
+      <div class="grid2">
+        ${sel('pf-quality', 'pf.quality', ['low', 'medium', 'high'] as const, p.quality, tr('q'))}
+        ${sel('pf-lang', 'pf.lang', ['fr', 'en'] as const, p.lang, (v) => (v === 'fr' ? 'Français' : 'English'))}
+      </div>`;
+
     return `
       <form class="profile" id="profile-form">
-        <label>${t('pf.name')}<input type="text" id="pf-name" value="${escapeHtml(p.name)}" maxlength="30"></label>
-        <div class="grid2">
-          ${num('pf-weight', 'pf.weight', p.weightKg, 30, 200, 0.5)}
-          ${num('pf-height', 'pf.height', p.heightCm, 120, 220)}
-          ${num('pf-ftp', 'pf.ftp', p.ftp, 50, 600)}
-          ${num('pf-hrmax', 'pf.hrmax', p.hrMax, 100, 230)}
-        </div>
-        <div class="grid2">
-          <label>${t('pf.frame')}<select id="pf-frame">${opt<FrameId>(['climb', 'aero', 'mtb'], p.frame, (v) => t(`frame.${v}` as I18nKey))}</select></label>
-          <label>${t('pf.wheels')}<select id="pf-wheels">${opt<WheelId>(['alu', 'c40', 'c55', 'c88'], p.wheels, (v) => t(`wheel.${v}` as I18nKey))}</select></label>
-        </div>
-        <fieldset><legend>${t('pf.kit')}</legend>
-          <label class="check"><input type="checkbox" id="pf-aero" ${p.kit.aeroHelmet ? 'checked' : ''}> ${t('pf.aeroHelmet')}</label>
-          <label class="check"><input type="checkbox" id="pf-socks" ${p.kit.highSocks ? 'checked' : ''}> ${t('pf.highSocks')}</label>
-          <label class="check"><input type="checkbox" id="pf-over" ${p.kit.overshoes ? 'checked' : ''}> ${t('pf.overshoes')}</label>
-        </fieldset>
-        <p class="hint">${t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) })}</p>
-        <div class="grid3">
-          <label>${t('pf.jersey')}<input type="color" id="pf-j1" value="${p.jerseyColor}"></label>
-          <label>${t('pf.jersey2')}<input type="color" id="pf-j2" value="${p.jerseyColor2}"></label>
-          <label>${t('pf.helmet')}<input type="color" id="pf-hc" value="${p.helmetColor}"></label>
-        </div>
-        <label>${t('pf.difficulty', { v: Math.round(p.trainerDifficulty * 100) })}<input type="range" id="pf-diff" min="0" max="100" step="5" value="${Math.round(p.trainerDifficulty * 100)}"></label>
-        <fieldset><legend>${t('pf.shifting')}</legend>
-          <label class="check"><input type="radio" name="pf-shift" value="virtual" ${p.shifting === 'virtual' ? 'checked' : ''}> ${t('pf.shift.virtual')}</label>
-          <label class="check"><input type="radio" name="pf-shift" value="manual" ${p.shifting === 'manual' ? 'checked' : ''}> ${t('pf.shift.manual')}</label>
-          <h4 class="sub">${t('pf.realSetup')}</h4>
-          <div class="grid2">
-            ${num('pf-ring', 'pf.chainring', p.chainring, 20, 60)}
-            ${num('pf-cog', 'pf.cog', p.cogTeeth, 10, 36)}
-          </div>
-          <p class="hint">${t('pf.cogHint')}</p>
-          <h4 class="sub">${t('pf.virtualSetup')}</h4>
-          <div class="grid3">
-            <label>${t('pf.rings')}<select id="pf-rings">${Object.keys(CHAINRINGS).map((k) => `<option value="${k}" ${k === p.drivetrain.chainrings ? 'selected' : ''}>${CHAINRINGS[k].length > 1 ? `${k} (${t('pf.double')})` : `${k} (${t('pf.single')})`}</option>`).join('')}</select></label>
-            <label>${t('pf.cassette')}<select id="pf-cassette">${Object.keys(CASSETTES).map((k) => `<option value="${k}" ${k === p.drivetrain.cassette ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-            <label>${t('pf.tire')}<select id="pf-tire">${(Object.keys(TIRES) as TireId[]).map((k) => `<option value="${k}" ${k === p.drivetrain.tire ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-          </div>
-          <label class="check"><input type="checkbox" id="pf-seq" ${p.drivetrain.sequential ? 'checked' : ''}> ${t('pf.sequential')}</label>
-          <div class="grid3">
-            <label>${t('pf.keyUp')}<input type="text" readonly class="keycap" id="pf-kup" value="${escapeHtml(p.keyGearUp)}"></label>
-            <label>${t('pf.keyDown')}<input type="text" readonly class="keycap" id="pf-kdown" value="${escapeHtml(p.keyGearDown)}"></label>
-            <label>${t('pf.keyFront')}<input type="text" readonly class="keycap" id="pf-kfront" value="${escapeHtml(p.keyFront)}"></label>
-          </div>
-          <p class="hint">${t('pf.keyHint')}</p>
-        </fieldset>
-        <div class="grid2">
-          <label>${t('pf.quality')}<select id="pf-quality">${opt<QualityLevel>(['low', 'medium', 'high'], p.quality, (v) => t(`q.${v}` as I18nKey))}</select></label>
-          <label>${t('pf.lang')}<select id="pf-lang">${opt<Lang>(['fr', 'en'], p.lang, (v) => (v === 'fr' ? 'Français' : 'English'))}</select></label>
-        </div>
+        ${section('rider', 'pf.sec.rider', rider)}
+        ${section('kit', 'pf.sec.kit', kit)}
+        ${section('bike', 'pf.sec.bike', bike)}
+        <p class="hint" id="pf-physics">${t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) })}</p>
+        ${section('drive', 'pf.sec.drive', drive)}
+        ${section('display', 'pf.sec.display', display)}
+        <p class="hint preview-note" id="pf-dirty" hidden>${t('pf.preview')}</p>
         <button type="submit" class="primary big">${t('pf.save')}</button>
       </form>
       <h3>${t('pf.backup')}</h3>
@@ -370,11 +439,72 @@ export class App {
       </div>`;
   }
 
-  private bindProfileTab(): void {
-    const form = $<HTMLFormElement>(this.ui, '#profile-form');
+  /** Lit le formulaire du profil et renvoie le profil qui en résulte (sans l'enregistrer). */
+  private readProfileForm(): Profile {
+    const p = this.profile;
     const val = (id: string) => $<HTMLInputElement>(this.ui, `#${id}`).value;
     const chk = (id: string) => $<HTMLInputElement>(this.ui, `#${id}`).checked;
+    const radio = (name: string, d: string) => $<HTMLInputElement>(this.ui, `input[name=${name}]:checked`)?.value ?? d;
     const clamp = (v: number, a: number, b: number, d: number) => (Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d);
+    const appearance: Appearance = {
+      ...p.appearance,
+      skin: radio('pf-skin', p.appearance.skin),
+      hair: val('pf-hair') as Appearance['hair'],
+      hairColor: radio('pf-haircolor', p.appearance.hairColor),
+      beard: val('pf-beard') as Appearance['beard'],
+      pattern: val('pf-pattern') as Appearance['pattern'],
+      jerseyColor3: val('pf-j3'),
+      shortsColor: val('pf-shorts'),
+      sleeves: val('pf-sleeves') as Appearance['sleeves'],
+      gloves: val('pf-gloves') as Appearance['gloves'],
+      helmetType: val('pf-helmet') as Appearance['helmetType'],
+      glasses: chk('pf-glasses'),
+      lens: val('pf-lens') as Appearance['lens'],
+      shoeColor: val('pf-shoes'),
+      sockColor: val('pf-sockc'),
+      sockHeight: val('pf-sockh') as Appearance['sockHeight'],
+      frameColor: val('pf-fc'),
+      frameColor2: val('pf-fc2'),
+      finish: val('pf-finish') as Appearance['finish'],
+      groupset: val('pf-group') as Appearance['groupset'],
+      barTape: val('pf-tape'),
+      tireWall: val('pf-tirewall') as Appearance['tireWall'],
+      saddleColor: val('pf-saddle'),
+      bottles: Number(val('pf-bottles')) as Appearance['bottles'],
+      bottleColor: val('pf-bottlec'),
+      computer: chk('pf-computer'),
+      towel: chk('pf-towel'),
+    };
+    return {
+      ...p,
+      name: val('pf-name').trim(),
+      weightKg: clamp(parseFloat(val('pf-weight')), 30, 200, p.weightKg),
+      heightCm: clamp(parseFloat(val('pf-height')), 120, 220, p.heightCm),
+      ftp: clamp(parseFloat(val('pf-ftp')), 50, 600, p.ftp),
+      hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
+      frame: val('pf-frame') as FrameId,
+      wheels: val('pf-wheels') as WheelId,
+      // le casque aéro/CLM et les chaussettes hautes comptent aussi dans la physique
+      kit: { aeroHelmet: appearance.helmetType !== 'road', highSocks: appearance.sockHeight === 'high', overshoes: chk('pf-over') },
+      jerseyColor: val('pf-j1'),
+      jerseyColor2: val('pf-j2'),
+      helmetColor: val('pf-hc'),
+      appearance,
+      trainerDifficulty: clamp(parseFloat(val('pf-diff')) / 100, 0, 1, 1),
+      shifting: radio('pf-shift', 'virtual') as Profile['shifting'],
+      chainring: Math.round(clamp(parseFloat(val('pf-ring')), 20, 60, p.chainring)),
+      cogTeeth: Math.round(clamp(parseFloat(val('pf-cog')), 10, 36, p.cogTeeth)),
+      keyGearUp: val('pf-kup') || 'PageUp',
+      keyGearDown: val('pf-kdown') || 'PageDown',
+      keyFront: val('pf-kfront') || 'f',
+      drivetrain: { chainrings: val('pf-rings'), cassette: val('pf-cassette'), tire: val('pf-tire') as TireId, sequential: chk('pf-seq') },
+      quality: val('pf-quality') as QualityLevel,
+      lang: val('pf-lang') as Lang,
+    };
+  }
+
+  private bindProfileTab(): void {
+    const form = $<HTMLFormElement>(this.ui, '#profile-form');
     $<HTMLInputElement>(this.ui, '#pf-diff').addEventListener('input', (e) => {
       const lbl = (e.target as HTMLElement).parentElement!;
       lbl.firstChild!.textContent = t('pf.difficulty', { v: (e.target as HTMLInputElement).value });
@@ -387,38 +517,35 @@ export class App {
         inp.value = e.key;
       }),
     );
+    // Sections repliables : on se souvient de celles qui sont ouvertes.
+    this.ui.querySelectorAll<HTMLDetailsElement>('details.pf-sec').forEach((d) =>
+      d.addEventListener('toggle', () => {
+        if (d.open) this.pfOpen.add(d.dataset.sec!);
+        else this.pfOpen.delete(d.dataset.sec!);
+      }),
+    );
+    // Aperçu en direct : chaque modification redessine l'avatar (au plus une fois par image).
+    let pending = 0;
+    const preview = () => {
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = 0;
+        const draft = this.readProfileForm();
+        this.home.setLook(lookFromProfile(draft));
+        const params = buildParams({ weightKg: draft.weightKg, heightCm: draft.heightCm, frame: draft.frame, wheels: draft.wheels, kit: draft.kit });
+        $(this.ui, '#pf-physics').textContent = t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) });
+        $(this.ui, '#pf-dirty').hidden = false;
+      });
+    };
+    form.addEventListener('input', preview);
+    form.addEventListener('change', preview);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      const p = this.profile;
-      const lang = val('pf-lang') as Lang;
-      const quality = val('pf-quality') as QualityLevel;
-      Object.assign(p, {
-        name: val('pf-name').trim(),
-        weightKg: clamp(parseFloat(val('pf-weight')), 30, 200, p.weightKg),
-        heightCm: clamp(parseFloat(val('pf-height')), 120, 220, p.heightCm),
-        ftp: clamp(parseFloat(val('pf-ftp')), 50, 600, p.ftp),
-        hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
-        frame: val('pf-frame') as FrameId,
-        wheels: val('pf-wheels') as WheelId,
-        kit: { aeroHelmet: chk('pf-aero'), highSocks: chk('pf-socks'), overshoes: chk('pf-over') },
-        jerseyColor: val('pf-j1'),
-        jerseyColor2: val('pf-j2'),
-        helmetColor: val('pf-hc'),
-        trainerDifficulty: clamp(parseFloat(val('pf-diff')) / 100, 0, 1, 1),
-        shifting: ($<HTMLInputElement>(this.ui, 'input[name=pf-shift]:checked')?.value ?? 'virtual') as Profile['shifting'],
-        chainring: Math.round(clamp(parseFloat(val('pf-ring')), 20, 60, p.chainring)),
-        cogTeeth: Math.round(clamp(parseFloat(val('pf-cog')), 10, 36, p.cogTeeth)),
-        keyGearUp: val('pf-kup') || 'PageUp',
-        keyGearDown: val('pf-kdown') || 'PageDown',
-        keyFront: val('pf-kfront') || 'f',
-        drivetrain: { chainrings: val('pf-rings'), cassette: val('pf-cassette'), tire: val('pf-tire') as TireId, sequential: chk('pf-seq') },
-        quality,
-        lang,
-        configured: true,
-      });
+      const next = this.readProfileForm();
+      Object.assign(this.save.profile, next, { configured: true });
       writeSave(this.save);
-      setLang(lang);
-      this.engine.setQuality(QUALITY[quality]);
+      setLang(next.lang);
+      this.engine.setQuality(QUALITY[next.quality]);
       this.home.setLook(this.look());
       this.message = t('pf.saved');
       this.renderHome();
@@ -457,7 +584,27 @@ export class App {
   // -------------------------------------------------------------------------
   // Sortie
 
+  /**
+   * Animation « on entre dans la TV » avant la sortie : la caméra passe au-dessus de l'épaule
+   * du cycliste et plonge dans l'écran, qui s'illumine, puis le chargement commence.
+   */
+  private async playEnterTv(): Promise<HTMLElement | null> {
+    if (this.ride || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return null;
+    this.entering = true;
+    this.ui.querySelector('.home')?.classList.add('leaving');
+    const flash = document.createElement('div');
+    flash.className = 'tv-flash';
+    document.body.appendChild(flash);
+    await this.home.enterTv((p) => {
+      flash.style.opacity = String(Math.max(0, (p - 0.72) / 0.28));
+    });
+    this.entering = false;
+    return flash;
+  }
+
   private async startRide(source: RideSource): Promise<void> {
+    if (this.entering) return;
+    const flash = await this.playEnterTv();
     const title = source.kind === 'gpx' ? source.route.name : source.name;
     this.ui.innerHTML = `
       <div class="loading">
@@ -467,6 +614,10 @@ export class App {
         <small id="prog-step"></small>
       </div>
       <div id="ride-overlay"></div>`;
+    if (flash) {
+      requestAnimationFrame(() => flash.classList.add('out'));
+      setTimeout(() => flash.remove(), 800);
+    }
     const overlay = $(this.ui, '#ride-overlay');
     const ride = new RideView(source, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
       onPauseMenu: () => this.showPause(),
@@ -623,6 +774,7 @@ export class App {
     this.ride?.dispose();
     this.ride = null;
     this.engine.setView(this.home);
+    this.home.exitTv();
     this.tab = this.message ? this.tab : 'history';
     if (!this.save.history.length) this.tab = 'ride';
     this.renderHome();

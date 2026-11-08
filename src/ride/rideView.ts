@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import type { View } from '../render/engine';
 import { createSky } from '../render/engine';
 import { RiderModel } from '../render/riderModel';
+import { lookFromProfile } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
 import type { Track } from '../geo/track';
@@ -125,11 +126,7 @@ export class RideView implements View {
     this.landmarks = new Landmarks(this.track.proj, this.horizon);
     s.add(this.landmarks.group);
 
-    this.rider = new RiderModel({
-      heightCm: profile.heightCm, frame: profile.frame, wheels: profile.wheels,
-      jerseyColor: profile.jerseyColor, jerseyColor2: profile.jerseyColor2, helmetColor: profile.helmetColor,
-      highSocks: profile.kit.highSocks, aeroHelmet: profile.kit.aeroHelmet,
-    });
+    this.rider = new RiderModel(lookFromProfile(profile));
     s.add(this.rider.root);
     this.params = buildParams({
       weightKg: profile.weightKg, heightCm: profile.heightCm, frame: profile.frame, wheels: profile.wheels, kit: profile.kit,

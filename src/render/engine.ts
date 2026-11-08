@@ -9,6 +9,8 @@ export interface View {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   update(dt: number): void;
+  /** appelé quand la taille de l'affichage change (en pixels CSS) */
+  resize?(w: number, h: number): void;
 }
 
 export class Engine {
@@ -29,6 +31,9 @@ export class Engine {
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Ombres portées : seules les lumières qui le demandent en calculent (décor d'accueil).
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.setQuality(quality);
     window.addEventListener('resize', () => this.resize());
   }
@@ -50,6 +55,7 @@ export class Engine {
     if (this.view) {
       this.view.camera.aspect = w / h;
       this.view.camera.updateProjectionMatrix();
+      this.view.resize?.(w, h);
     }
   }
 
