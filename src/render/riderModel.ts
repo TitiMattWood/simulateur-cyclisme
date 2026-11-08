@@ -85,6 +85,22 @@ function ttShellGeometry(): THREE.BufferGeometry {
   return new THREE.LatheGeometry(pts, 26, Math.PI * 0.875, Math.PI * 1.25).rotateZ(-Math.PI / 2);
 }
 
+/** Étire l'arrière (x < 0) d'une calotte : l'arrière s'allonge et descend, sans cassure. */
+function stretchBack<T extends THREE.BufferGeometry>(g: T, k: number): T {
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    if (x < 0) {
+      const t = -x;
+      pos.setX(i, x - k * t * t);
+      pos.setY(i, pos.getY(i) - 0.18 * k * t * t);
+      pos.setZ(i, pos.getZ(i) * (1 - 0.18 * t * t));
+    }
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 const G = {
   thigh: keep(lathe(THIGH)),
   shortsLeg: keep(lathe(THIGH, 0, 0.8, 1.07)),
@@ -106,6 +122,9 @@ const G = {
   helmetShell: keep(new THREE.SphereGeometry(1, 40, 18, 0, Math.PI * 2, 0, Math.PI * 0.6)),
   /** liseré inférieur de la coque */
   helmetEdge: keep(new THREE.SphereGeometry(1.015, 40, 2, 0, Math.PI * 2, Math.PI * 0.555, Math.PI * 0.05)),
+  /** coque de casque aéro : même calotte, étirée en douceur vers l'arrière (goutte d'eau courte) */
+  aeroShell: keep(stretchBack(new THREE.SphereGeometry(1, 40, 18, 0, Math.PI * 2, 0, Math.PI * 0.6), 0.6)),
+  aeroEdge: keep(stretchBack(new THREE.SphereGeometry(1.015, 40, 2, 0, Math.PI * 2, Math.PI * 0.555, Math.PI * 0.05), 0.6)),
   /** molette de serrage */
   dial: keep(new THREE.CylinderGeometry(1, 1, 1, 16)),
   /** verre de lunettes enveloppant (portion de cylindre ouvert, centré vers +X) */
@@ -219,6 +238,20 @@ function solve2(a: THREE.Vector3, b: THREE.Vector3, l1: number, l2: number, bend
   return V(a.x + Math.cos(base + ang) * l1, a.y + Math.sin(base + ang) * l1, a.z);
 }
 
+/**
+ * Position de l'épaule : intersection du cercle de rayon `torso` autour de la hanche et du
+ * cercle de rayon `reach` autour des mains (solution du dessus). Si les mains sont trop loin,
+ * les bras se tendent et le buste pointe vers elles.
+ */
+function fitShoulder(hip: THREE.Vector3, grip: THREE.Vector3, torso: number, reach: number): THREE.Vector3 {
+  const dx = grip.x - hip.x, dy = grip.y - hip.y;
+  const d = Math.hypot(dx, dy) || 1e-6;
+  const r = Math.min(Math.max(reach, d - torso + 1e-3), d + torso - 1e-3);
+  const a = (torso * torso - r * r + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, torso * torso - a * a));
+  return V(hip.x + (a * dx) / d - (h * dy) / d, hip.y + (a * dy) / d + (h * dx) / d);
+}
+
 // ---------------------------------------------------------------------------
 // Géométrie des cadres (roue arrière en x = 0). Valeurs en mètres pour un cadre « M ».
 
@@ -242,6 +275,11 @@ interface FrameGeo {
   /** angle du buste au-dessus de l'horizontale (degrés) */
   torso: number;
   hands: Hands;
+  /** potence : longueur (m) et angle par rapport à l'horizontale (degrés, + = vers le haut) */
+  stemLen: number;
+  stemAngle: number;
+  /** hauteur d'entretoises sous la potence (m) */
+  spacer: number;
   /** recul de la selle (m, + = vers l'avant) */
   saddleFwd: number;
   suspension: boolean;
@@ -249,15 +287,16 @@ interface FrameGeo {
 
 const GEO: Record<FrameId, FrameGeo> = {
   // Route « grimpeur » (esprit Scott Addict RC) : tubes fins à profil tronqué, haubans plongeants.
-  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.26, 0.78], headTop: [0.85, 0.79], headBot: [0.89, 0.63], tube: 0.0155, deep: 1.6, stayAt: 0.7, torso: 41, hands: 'hoods', saddleFwd: 0, suspension: false },
-  // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas.
-  aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.27, 0.77], headTop: [0.85, 0.77], headBot: [0.89, 0.62], tube: 0.0135, deep: 2.6, stayAt: 0.6, torso: 37, hands: 'hoods', saddleFwd: 0.005, suspension: false },
-  // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé.
-  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.27, 0.77], headTop: [0.88, 0.81], headBot: [0.92, 0.64], tube: 0.0165, deep: 1.5, stayAt: 0.68, torso: 45, hands: 'flare', saddleFwd: 0, suspension: false },
+  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.26, 0.78], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.7, torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
+  // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas, avant plus bas.
+  aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.27, 0.77], headTop: [0.85, 0.77], headBot: [0.893, 0.62], tube: 0.0135, deep: 2.6, stayAt: 0.6, torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
+  // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé, avant plus haut.
+  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.27, 0.77], headTop: [0.88, 0.81], headBot: [0.925, 0.645], tube: 0.0165, deep: 1.5, stayAt: 0.68, torso: 45, hands: 'flare', stemLen: 0.09, stemAngle: -4, spacer: 0.03, saddleFwd: 0, suspension: false },
   // Contre-la-montre (esprit Scott Plasma) : avant massif et intégré, prolongateurs.
-  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', saddleFwd: 0.035, suspension: false },
-  // VTT tout-suspendu (esprit Scott Spark) : amortisseur dans le cadre, fourche suspendue.
-  mtb: { R: 0.37, tire: 0.029, wheelbase: 1.13, bb: [0.44, 0.33], seatTop: [0.27, 0.72], headTop: [0.94, 0.85], headBot: [0.98, 0.67], tube: 0.021, deep: 1.35, stayAt: 0.62, torso: 54, hands: 'flat', saddleFwd: 0, suspension: true },
+  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
+  // VTT tout-suspendu 29" (esprit Scott Spark) : direction très couchée (65,5°), fourche longue,
+  // tube horizontal plongeant, potence courte, cintre large relevé, amortisseur sous le tube horizontal.
+  mtb: { R: 0.37, tire: 0.029, wheelbase: 1.18, bb: [0.44, 0.34], seatTop: [0.33, 0.75], headTop: [0.954, 0.97], headBot: [1.0, 0.87], tube: 0.021, deep: 1.35, stayAt: 0.74, torso: 50, hands: 'flat', stemLen: 0.05, stemAngle: 0, spacer: 0.02, saddleFwd: 0, suspension: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -503,7 +542,8 @@ export class RiderModel {
     // triangle avant
     ftube(bb, seatTop, T, D); // tube de selle
     ftube(bb, headBot.clone().add(V(-0.01, -0.01)), T * 1.4, D * 0.95); // tube diagonal
-    ftube(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.02)), T * 0.95, ttDepth); // tube horizontal
+    // tube horizontal (plongeant sur le VTT : il rejoint le tube de selle bien plus bas)
+    ftube(geo.suspension ? bb.clone().lerp(seatTop, 0.8) : seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.02)), T * 0.95, ttDepth);
     {
       // douille conique, profilée sur les cadres aéro
       const ht = new THREE.Mesh(D > 2 ? AIRFOIL : HEAD_TUBE, mFrame);
@@ -535,14 +575,18 @@ export class RiderModel {
       bike.add(box(mFrame, V(0.005, R, z * 1.02), 0.04, 0.03, 0.008)); // patte de roue
     }
     if (geo.suspension) {
-      // biellette (rocker) et amortisseur logé devant le tube de selle
-      const rk = V(stayTop.x - 0.05, stayTop.y, 0);
-      const rk2 = bb.clone().lerp(seatTop, geo.stayAt + 0.07).add(V(0.012, 0));
-      bike.add(blob(mBlack, rk.clone().lerp(rk2, 0.5), 0.045, 0.02, 0.04));
-      const s0 = bb.clone().add(V(0.06, 0.09)), s1 = bb.clone().lerp(seatTop, geo.stayAt + 0.04).add(V(0.035, 0));
-      const mid = s0.clone().lerp(s1, 0.55);
-      tube(mBlack, s0, mid, 0.019); // corps de l'amortisseur
-      tube(shiny('#c9ccd0', 90, '#ffffff'), mid, s1, 0.009); // tige
+      // biellette sur le tube de selle, amortisseur couché sous le tube horizontal
+      const rkPivot = bb.clone().lerp(seatTop, 0.75);
+      const rkBack = V(stayTop.x - 0.05, stayTop.y);
+      const rkFront = rkPivot.clone().add(V(0.07, 0.025));
+      for (const z of [-0.03, 0.03]) tube(mBlack, V(rkBack.x, rkBack.y, z), V(rkFront.x, rkFront.y, z), 0.011, 1.8);
+      bike.add(blob(mBlack, rkPivot, 0.016, 0.016, 0.04));
+      const shockEnd = bb.clone().lerp(headBot, 0.3).add(V(-0.01, 0.045));
+      const can = rkFront.clone().lerp(shockEnd, 0.5);
+      tube(mBlack, rkFront, can, 0.024); // chambre à air
+      tube(shiny('#c9ccd0', 90, '#ffffff'), can, shockEnd, 0.011); // tige
+      tube(lam('#d03a2a'), can.clone().lerp(rkFront, 0.15), can.clone().lerp(rkFront, 0.3), 0.025); // bague de réglage
+      bike.add(blob(mFrame, shockEnd, 0.02, 0.02, 0.03)); // patte d'amortisseur
       bike.add(blob(mBlack, pivot, 0.02, 0.02, 0.05)); // pivot principal
     }
     // fourche
@@ -588,9 +632,10 @@ export class RiderModel {
     this.hip = this.hipFor(bb, stDir, saddleD, geo.saddleFwd);
     const hip = this.hip;
     const torsoLen = 0.54 * s;
-    const ta = (geo.torso * Math.PI) / 180;
-    const shoulder = hip.clone().add(V(Math.cos(ta) * torsoLen, Math.sin(ta) * torsoLen));
-    const upperArm = 0.29 * s, foreArm = 0.29 * s;
+    // bras : épaule → coude, puis coude → milieu de la main posée sur le cintre
+    const upperArm = 0.3 * s, foreArm = 0.33 * s;
+    /** articulation de l'épaule par rapport au haut du buste */
+    const shOff = V(-0.01 * s, -0.035 * s);
 
     // tige de selle + selle
     const postEnd = saddle.clone().addScaledVector(stDir, -0.025);
@@ -610,18 +655,24 @@ export class RiderModel {
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, -0.03)), saddle.clone().add(V(0.12, 0.0, -0.015)), 0.003);
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, 0.03)), saddle.clone().add(V(0.12, 0.0, 0.015)), 0.003);
 
-    // Mains et cintre selon le type de guidon.
+    // Cockpit : sa position vient du vélo (entretoises + potence), comme en vrai ;
+    // le cycliste s'y adapte en inclinant le buste pour que ses mains tombent sur le cintre.
     const hands: THREE.Vector3[] = [];
     const elbows: THREE.Vector3[] = [];
     let barCenter: THREE.Vector3;
-    const stemFrom = headTop.clone().add(V(-0.005, 0.03));
+    let shoulder: THREE.Vector3;
+    const axis = new THREE.Vector3().subVectors(headTop, headBot).normalize();
+    const stemFrom = headTop.clone().addScaledVector(axis, geo.spacer + 0.012);
     if (geo.hands === 'tt') {
-      // Avant-bras posés sur les manchettes, mains au bout des prolongateurs.
-      const elbowC = shoulder.clone().add(V(0.03 * s, -upperArm * 0.97));
+      // Avant-bras posés sur les manchettes (8,5 cm au-dessus de la douille), bras verticaux.
+      const padY = headTop.y + 0.085;
+      const dy = Math.min(torsoLen * 0.9, padY + upperArm * 0.97 - shOff.y - hip.y);
+      shoulder = hip.clone().add(V(Math.sqrt(torsoLen * torsoLen - dy * dy), dy));
+      const elbowC = shoulder.clone().add(shOff).add(V(0.03 * s, -upperArm * 0.97));
       barCenter = elbowC.clone().add(V(0.07, -0.07));
       for (const side of [-1, 1]) {
         const el = V(elbowC.x, elbowC.y, side * 0.095);
-        const hd = V(elbowC.x + foreArm * 0.98, elbowC.y + 0.04, side * 0.045);
+        const hd = V(elbowC.x + foreArm * 0.9, elbowC.y + 0.04, side * 0.045);
         elbows.push(el);
         hands.push(hd);
         // manchette creuse et coussin
@@ -655,21 +706,25 @@ export class RiderModel {
         bike.add(wing);
       }
     } else {
-      const beta = ((geo.hands === 'flat' ? 98 : 94) - geo.torso) * (Math.PI / 180);
-      const reach = (upperArm + foreArm) * (geo.hands === 'flat' ? 0.93 : 0.95);
-      const hand = shoulder.clone().add(V(Math.cos(beta) * reach, -Math.sin(beta) * reach));
+      const sa = (geo.stemAngle * Math.PI) / 180;
+      barCenter = stemFrom.clone().add(V(Math.cos(sa) * geo.stemLen, Math.sin(sa) * geo.stemLen));
       if (geo.hands === 'flat') {
-        barCenter = hand.clone().add(V(-0.025, -0.01));
-        const w = 0.37;
-        tube(mBlack, V(barCenter.x, barCenter.y, -w), V(barCenter.x, barCenter.y, w), 0.011);
+        // cintre VTT relevé (3 cm), large (76 cm), légèrement reculé vers les mains
+        const w = 0.38, rise = 0.03, bc = barCenter;
+        const bar = new THREE.CatmullRomCurve3([
+          V(bc.x - 0.03, bc.y + rise, -w), V(bc.x - 0.012, bc.y + rise, -0.2), V(bc.x, bc.y + 0.006, -0.08), V(bc.x, bc.y, 0),
+          V(bc.x, bc.y + 0.006, 0.08), V(bc.x - 0.012, bc.y + rise, 0.2), V(bc.x - 0.03, bc.y + rise, w),
+        ]);
+        bike.add(new THREE.Mesh(new THREE.TubeGeometry(bar, 40, 0.0115, 8), mBlack));
         for (const side of [-1, 1]) {
-          tube(mTape, V(barCenter.x, barCenter.y, side * (w - 0.13)), V(barCenter.x, barCenter.y, side * w), 0.016);
-          tube(mGroup, V(barCenter.x, barCenter.y + 0.01, side * (w - 0.16)), V(barCenter.x + 0.08, barCenter.y + 0.0, side * (w - 0.06)), 0.005);
-          hands.push(V(barCenter.x + 0.005, barCenter.y + 0.012, side * (w - 0.07)));
+          const g0 = V(bc.x - 0.024, bc.y + rise, side * (w - 0.13)), g1 = V(bc.x - 0.03, bc.y + rise, side * w);
+          tube(mTape, g0, g1, 0.016); // poignée
+          tube(mGroup, V(bc.x - 0.018, bc.y + rise + 0.01, side * (w - 0.155)), V(bc.x + 0.06, bc.y + rise - 0.005, side * (w - 0.06)), 0.005); // levier de frein
+          bike.add(blob(mBlack, V(bc.x - 0.02, bc.y + rise, side * (w - 0.15)), 0.02, 0.018, 0.012)); // maître-cylindre
+          hands.push(V(bc.x - 0.022, bc.y + rise + 0.012, side * (w - 0.07)));
         }
       } else {
-        // Cintre route : la main est posée sur la cocotte, 7 cm devant le haut du cintre.
-        barCenter = hand.clone().add(V(-0.07, -0.012));
+        // Cintre route : la main est posée sur la cocotte, 8 cm devant le haut du cintre.
         const w = geo.hands === 'flare' ? 0.215 : 0.2;
         const flare = geo.hands === 'flare' ? 0.045 : 0.008;
         // cintre-potence monobloc : le dessus du cintre est une aile plate (cockpit intégré)
@@ -684,14 +739,13 @@ export class RiderModel {
             V(barCenter.x + 0.004, barCenter.y, side * (w - 0.06)),
             V(barCenter.x + 0.015, barCenter.y, side * (w - 0.025)),
             V(barCenter.x + 0.065, barCenter.y - 0.005, z),
-            V(barCenter.x + 0.095, barCenter.y - 0.06, z + side * flare * 0.4),
-            V(barCenter.x + 0.06, barCenter.y - 0.125, z + side * flare),
-            V(barCenter.x - 0.015, barCenter.y - 0.13, z + side * flare),
+            V(barCenter.x + 0.09, barCenter.y - 0.055, z + side * flare * 0.4),
+            V(barCenter.x + 0.065, barCenter.y - 0.12, z + side * flare),
+            V(barCenter.x - 0.02, barCenter.y - 0.128, z + side * flare),
           ]);
-          const m = new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.0118, 8), mTape);
-          bike.add(m);
+          bike.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.0118, 8), mTape));
           // cocotte et levier
-          const hood = V(barCenter.x + 0.085, barCenter.y + 0.012, z + side * 0.002);
+          const hood = V(barCenter.x + 0.08, barCenter.y + 0.012, z + side * 0.002);
           const h = blob(mBlack, hood.clone().add(V(-0.005, -0.002)), 0.042, 0.02, 0.016);
           h.rotation.z = 0.3;
           bike.add(h, blob(mBlack, hood.clone().add(V(0.03, 0.012)), 0.012, 0.014, 0.012));
@@ -699,7 +753,10 @@ export class RiderModel {
           hands.push(hood.clone().add(V(-0.005, 0.02, 0)));
         }
       }
+      // Épaule : à torsoLen de la hanche et à portée de bras (coudes un peu fléchis) des mains.
+      shoulder = fitShoulder(hip, hands[1].clone().sub(shOff).setZ(0), torsoLen, (upperArm + foreArm) * (geo.hands === 'flat' ? 0.88 : 0.9));
     }
+    const ta = Math.atan2(shoulder.y - hip.y, shoulder.x - hip.x);
     // potence
     if (geo.hands === 'flat') {
       tube(mBlack, stemFrom, barCenter, 0.017, 1.1);
@@ -825,7 +882,8 @@ export class RiderModel {
 
     // ----- Transmission
     this.crank.position.copy(bb);
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.005, 44), mGroup);
+    const ringR = geo.suspension ? 0.075 : 0.1;
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(ringR, ringR, 0.005, 44), mGroup);
     ring.rotation.x = Math.PI / 2;
     ring.position.z = 0.065;
     this.crank.add(ring);
@@ -845,8 +903,8 @@ export class RiderModel {
     const cogTop = rear.clone().add(V(0, opts.trainer ? 0.04 : 0.045, chainZ));
     const cogBot = rear.clone().add(V(0.0, -0.04, chainZ));
     const mChain = shiny('#6f757b', 40);
-    tube(mChain, V(bb.x, bb.y + 0.1, chainZ), cogTop, 0.0035);
-    tube(mChain, V(bb.x, bb.y - 0.1, chainZ), cogBot.clone().add(V(0.01, -0.05)), 0.0035);
+    tube(mChain, V(bb.x, bb.y + ringR, chainZ), cogTop, 0.0035);
+    tube(mChain, V(bb.x, bb.y - ringR, chainZ), cogBot.clone().add(V(0.01, -0.05)), 0.0035);
     bike.add(box(mGroup, rear.clone().add(V(0.0, -0.085, 0.065)), 0.035, 0.07, 0.018)); // dérailleur arrière
     bike.add(box(mGroup, bb.clone().lerp(seatTop, 0.2).add(V(0.03, 0, 0.035)), 0.045, 0.02, 0.012)); // dérailleur avant
 
@@ -979,13 +1037,13 @@ export class RiderModel {
       // la coque est un groupe à l'échelle de la tête : les aérations s'y placent en coordonnées unité
       const shell = new THREE.Group();
       shell.position.copy(headC).add(V(-0.016 * hs, 0.05 * hs));
-      shell.scale.set((aero ? 0.152 : 0.145) * hs, (aero ? 0.1 : 0.104) * hs, 0.112 * hs);
+      shell.scale.set((aero ? 0.15 : 0.145) * hs, (aero ? 0.098 : 0.104) * hs, (aero ? 0.108 : 0.112) * hs);
       shell.rotation.z = 0.3; // l'avant remonte au-dessus des sourcils, l'arrière descend sur la nuque
-      shell.add(new THREE.Mesh(G.helmetShell, mHelmet), new THREE.Mesh(G.helmetEdge, mHelmetDark));
+      shell.add(new THREE.Mesh(aero ? G.aeroShell : G.helmetShell, mHelmet), new THREE.Mesh(aero ? G.aeroEdge : G.helmetEdge, mHelmetDark));
       if (aero) {
         // Evade : coque lisse, trois entrées d'air à l'avant, deux sorties à l'arrière
         for (const z of [-0.34, 0, 0.34]) vent(shell, 0.74, z, 0.15, 0.09);
-        for (const z of [-0.28, 0.28]) vent(shell, -0.72, z, 0.12, 0.08);
+        for (const z of [-0.26, 0.26]) vent(shell, -0.55, z, 0.12, 0.07);
         vent(shell, 0.05, 0, 0.38, 0.05); // canal central
       } else {
         // Prevail : grandes fentes longitudinales réparties sur toute la calotte
@@ -999,7 +1057,7 @@ export class RiderModel {
       }
       // molette de serrage à l'arrière
       const dial = new THREE.Mesh(G.dial, mHelmetDark);
-      dial.position.set(-0.98, -0.32, 0);
+      dial.position.set(aero ? -1.5 : -0.98, aero ? -0.48 : -0.32, 0);
       dial.rotation.z = Math.PI / 2;
       dial.scale.set(0.16, 0.12, 0.16);
       shell.add(dial);
