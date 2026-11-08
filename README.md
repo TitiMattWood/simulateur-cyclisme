@@ -26,7 +26,8 @@ Mondes : **Horizon du 95** (Val-d'Oise), **Côtes et Moutarde** (Côte-d'Or), **
 |---|---|
 | Avatar « réaliste stylisé » : membres au profil anatomique, silhouette selon la taille et le poids, visage, cheveux, barbe, lunettes | ✅ |
 | Tenue : 8 motifs de maillot, 3 couleurs, cuissard, manches courtes/longues, gants, 3 casques (route, aéro, CLM), chaussures, chaussettes, couvre-chaussures | ✅ |
-| Vélo : 5 cadres (route montagne, aéro, gravel, contre-la-montre, VTT) avec leur position et leur physique ; couleurs et finition du cadre, groupe, guidoline, pneus, selle, bidons, compteur | ✅ |
+| Vélo : 5 cadres dans l'esprit de la gamme Scott (Addict RC, Foil, Addict Gravel, Plasma, Spark tout-suspendu) avec leur position et leur physique : tubes à profil tronqué, haubans plongeants, cockpit intégré, inscription « MyHomeRide » ; couleurs et finition du cadre, groupe, guidoline, pneus (crampons en gravel/VTT), selle, bidons, compteur | ✅ |
+| Casques dans l'esprit de Specialized (route ventilé type Prevail, aéro type Evade, CLM à queue courte et visière type TT5) ; chaussures à molettes | ✅ |
 | Aperçu en direct de l'avatar pendant les réglages du profil, gros plan de la caméra | ✅ |
 | Pièce d'accueil : vélo face à une TV qui affiche une route ; au départ, la caméra plonge dans l'écran | ✅ |
 
