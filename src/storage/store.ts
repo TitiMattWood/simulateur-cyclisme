@@ -10,6 +10,7 @@ import { DEFAULT_DRIVETRAIN, type Drivetrain } from '../physics/gears';
 import type { RideSummary } from '../ride/recorder';
 import type { QualityLevel } from '../config';
 import type { Lang } from '../i18n';
+import { defaultAppearance, type Appearance } from '../render/look';
 
 export interface Profile {
   name: string;
@@ -23,6 +24,8 @@ export interface Profile {
   jerseyColor: string;
   jerseyColor2: string;
   helmetColor: string;
+  /** apparence détaillée : cycliste, tenue, vélo (voir render/look.ts) */
+  appearance: Appearance;
   lang: Lang;
   quality: QualityLevel;
   /** part de la pente réellement envoyée au trainer (1 = 100 %) */
@@ -64,6 +67,7 @@ export function defaultProfile(): Profile {
     jerseyColor: '#e4572e',
     jerseyColor2: '#1d3557',
     helmetColor: '#f1faee',
+    appearance: defaultAppearance(),
     lang: 'fr',
     quality: 'medium',
     trainerDifficulty: 1,
@@ -87,6 +91,13 @@ function normalize(raw: unknown): SaveData {
   const base = fresh();
   if (!raw || typeof raw !== 'object') return base;
   const r = raw as Partial<SaveData>;
+  const rp = (r.profile ?? {}) as Partial<Profile>;
+  // Profil créé avant les réglages d'apparence : on reprend ses anciens choix.
+  const migrated: Partial<Appearance> = rp.appearance ? {} : {
+    ...defaultAppearance(rp.frame ?? 'climb'),
+    helmetType: rp.kit?.aeroHelmet ? 'aero' : 'road',
+    sockHeight: rp.kit?.highSocks === false ? 'low' : 'high',
+  };
   return {
     version: 1,
     profile: {
@@ -94,6 +105,7 @@ function normalize(raw: unknown): SaveData {
       ...(r.profile ?? {}),
       kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) },
       drivetrain: { ...base.profile.drivetrain, ...(r.profile?.drivetrain ?? {}) },
+      appearance: { ...base.profile.appearance, ...migrated, ...(rp.appearance ?? {}) },
     },
     history: Array.isArray(r.history) ? r.history : [],
     xp: typeof r.xp === 'number' ? r.xp : 0,

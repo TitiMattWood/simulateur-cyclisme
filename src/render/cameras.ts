@@ -70,13 +70,13 @@ export class CameraRig {
 
     switch (this.mode) {
       case 'action':
-        desiredPos = body.localToWorld(this.tmp.set(0.66, 1.28, 0));
+        desiredPos = body.localToWorld(this.tmp.copy(rider.chest));
         desiredTarget = body.localToWorld(this.tmp2.set(3.5, 0.55, 0));
         fov = 92;
         kPos = kTarget = 40;
         break;
       case 'cockpit':
-        desiredPos = body.localToWorld(this.tmp.set(0.86, 1.6, 0));
+        desiredPos = body.localToWorld(this.tmp.copy(rider.eye));
         desiredTarget = body.localToWorld(this.tmp2.set(12, 1.0, 0));
         fov = 72;
         kPos = kTarget = 40;

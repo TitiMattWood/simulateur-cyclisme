@@ -10,7 +10,7 @@
  * tests de roulement). Elles sont plausibles, pas exactes au watt près.
  */
 
-export type FrameId = 'climb' | 'aero' | 'mtb';
+export type FrameId = 'climb' | 'aero' | 'gravel' | 'tt' | 'mtb';
 export type WheelId = 'alu' | 'c40' | 'c55' | 'c88';
 export type SurfaceId = 'asphalt' | 'rough' | 'gravel' | 'dirt';
 
@@ -27,6 +27,10 @@ export interface Frame {
 export const FRAMES: Record<FrameId, Frame> = {
   climb: { id: 'climb', mass: 7.4, cdaFactor: 1.0, crrFactor: { asphalt: 1, rough: 1, gravel: 1, dirt: 1 } },
   aero: { id: 'aero', mass: 8.0, cdaFactor: 0.94, crrFactor: { asphalt: 1, rough: 1.05, gravel: 1.05, dirt: 1.05 } },
+  // Gravel : pneus de 40 mm, position un peu plus relevée. Bon compromis hors bitume.
+  gravel: { id: 'gravel', mass: 8.9, cdaFactor: 1.05, crrFactor: { asphalt: 1.2, rough: 1.0, gravel: 0.8, dirt: 0.8 } },
+  // Contre-la-montre : position allongée sur les prolongateurs (environ −18 % de CdA), vélo plus lourd.
+  tt: { id: 'tt', mass: 8.9, cdaFactor: 0.82, crrFactor: { asphalt: 1, rough: 1.05, gravel: 1.1, dirt: 1.1 } },
   // VTT : position droite, pneus à crampons. Plus lent sur route, plus à l'aise hors bitume.
   mtb: { id: 'mtb', mass: 12.5, cdaFactor: 1.22, crrFactor: { asphalt: 2.0, rough: 1.35, gravel: 0.85, dirt: 0.7 } },
 };
