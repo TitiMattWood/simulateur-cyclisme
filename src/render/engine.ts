@@ -1,9 +1,12 @@
 /**
  * Moteur de rendu : un seul WebGLRenderer partagé entre l'écran d'accueil et la sortie.
- * Style « low-poly » : faces planes, éclairage simple, brume atmosphérique.
+ * Matériaux physiques (PBR), tone mapping « cinéma » ACES, reflets d'environnement,
+ * ombres douces et post-traitement (halo) selon la qualité choisie.
  */
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { QualityPreset } from '../config';
+import { PostFX, type BloomStyle, type PostLevel } from './post';
 
 export interface View {
   scene: THREE.Scene;
@@ -11,13 +14,22 @@ export interface View {
   update(dt: number): void;
   /** appelé quand la taille de l'affichage change (en pixels CSS) */
   resize?(w: number, h: number): void;
+  /** réglage du halo lumineux pour cette scène */
+  bloom?: BloomStyle;
+  /** exposition du tone mapping pour cette scène (1 par défaut) */
+  exposure?: number;
 }
+
+const DEFAULT_BLOOM: BloomStyle = { strength: 0.35, radius: 0.5, threshold: 0.9 };
 
 export class Engine {
   readonly renderer: THREE.WebGLRenderer;
   private view: View | null = null;
   private last = performance.now();
   private running = false;
+  private post: PostFX | null = null;
+  private envMap: THREE.Texture | null = null;
+  private boundBloom: BloomStyle | undefined;
   /** images par seconde (moyenne lissée) */
   fps = 60;
 
@@ -31,6 +43,8 @@ export class Engine {
       powerPreference: 'high-performance',
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
     // Ombres portées : seules les lumières qui le demandent en calculent (décor d'accueil).
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -40,18 +54,44 @@ export class Engine {
 
   setQuality(q: QualityPreset): void {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, q.pixelRatio));
+    this.renderer.shadowMap.type = q.post >= 2 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (!this.post || this.post.level !== q.post) {
+      this.post?.dispose();
+      this.post = q.post > 0 ? new PostFX(this.renderer, q.post as PostLevel) : null;
+    }
     this.resize();
+    this.bindPost();
   }
 
   setView(v: View): void {
     this.view = v;
     this.resize();
+    this.bindPost();
+  }
+
+  /**
+   * Carte d'environnement neutre (un studio éclairé) : elle donne des reflets crédibles
+   * aux matériaux brillants (cadre verni, casque, jantes) sans aucun fichier à télécharger.
+   */
+  environment(): THREE.Texture {
+    if (!this.envMap) {
+      const pm = new THREE.PMREMGenerator(this.renderer);
+      this.envMap = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+      pm.dispose();
+    }
+    return this.envMap;
+  }
+
+  private bindPost(): void {
+    if (this.post && this.view) this.post.setView(this.view.scene, this.view.camera, this.view.bloom ?? DEFAULT_BLOOM);
+    this.boundBloom = this.view?.bloom;
   }
 
   resize(): void {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.setSize(w, h);
     if (this.view) {
       this.view.camera.aspect = w / h;
       this.view.camera.updateProjectionMatrix();
@@ -72,7 +112,11 @@ export class Engine {
       if (dt > 0) this.fps += (1 / dt - this.fps) * 0.05;
       if (this.view) {
         this.view.update(dt);
-        this.renderer.render(this.view.scene, this.view.camera);
+        // le décor peut changer en cours de route (choix de la pièce au profil)
+        if (this.view.bloom !== this.boundBloom) this.bindPost();
+        this.renderer.toneMappingExposure = this.view.exposure ?? 1;
+        if (this.post) this.post.render(dt);
+        else this.renderer.render(this.view.scene, this.view.camera);
       }
     };
     requestAnimationFrame(loop);

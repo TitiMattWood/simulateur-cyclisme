@@ -14,6 +14,7 @@
  * Repère local : X = vers l'avant, Y = vers le haut, Z = vers la droite du cycliste.
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WHEELS, type FrameId } from '../physics/equipment';
 import { LENS, type RiderLook } from './look';
 
@@ -35,8 +36,8 @@ function keep<T extends THREE.BufferGeometry>(g: T): T {
 }
 
 /** Cylindre unitaire (hauteur 1, axe Y, base à l'origine). */
-const UNIT_CYL = keep(new THREE.CylinderGeometry(1, 1, 1, 12, 1).translate(0, 0.5, 0));
-const UNIT_SPHERE = keep(new THREE.SphereGeometry(1, 18, 12));
+let UNIT_CYL = keep(new THREE.CylinderGeometry(1, 1, 1, 12, 1).translate(0, 0.5, 0));
+let UNIT_SPHERE: THREE.BufferGeometry = keep(new THREE.SphereGeometry(1, 18, 12));
 const UNIT_BOX = keep(new THREE.BoxGeometry(1, 1, 1));
 
 /** Rayon interpolé dans un profil [[y, r], …] (y croissant de 0 à 1). */
@@ -167,10 +168,56 @@ function kammSection(): Array<[number, number]> {
   return pts;
 }
 
+/**
+ * Tube profilé dont la section change le long du tube (ex. tube diagonal qui s'épaissit vers
+ * la douille, comme sur les cadres aéro). Section A en bas (y = 0), section B en haut (y = 1) ;
+ * r = demi-largeur, d = profondeur relative (1 = rond).
+ */
+function taperedPrism(rA: number, dA: number, rB: number, dB: number, facet: boolean): THREE.BufferGeometry {
+  const base: Array<[number, number]> = facet ? [[1, -1], [1, 1], [-1, 1], [-1, -1]] : kammSection();
+  const n = base.length;
+  const pos: number[] = [], uv: number[] = [], idx: number[] = [];
+  for (let k = 0; k <= n; k++) {
+    const [x, z] = base[k % n];
+    pos.push(x * rA * dA, 0, z * rA, x * rB * dB, 1, z * rB);
+    uv.push(k / n, 0, k / n, 1);
+  }
+  for (let k = 0; k < n; k++) {
+    const a = 2 * k, b = a + 1, c = a + 2, d = a + 3;
+    idx.push(a, b, c, b, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 /** Tube de cadre profilé (section Kamm), base à l'origine, longueur 1 le long de Y. */
-const AIRFOIL = keep(prism(kammSection()));
+let AIRFOIL = keep(prism(kammSection()));
 /** Douille de direction conique : plus large en bas (roulement 1"1/2) qu'en haut. */
-const HEAD_TUBE = keep(new THREE.CylinderGeometry(0.78, 1, 1, 18).translate(0, 0.5, 0));
+let HEAD_TUBE = keep(new THREE.CylinderGeometry(0.78, 1, 1, 18).translate(0, 0.5, 0));
+
+/**
+ * Deux styles d'avatar :
+ *  - « arrondi » : surfaces lisses ;
+ *  - « facettes » : formes low-poly nettes (faces planes, tubes de cadre à section carrée),
+ *    qui prennent tout leur relief avec un éclairage soigné.
+ */
+const UNITS = {
+  smooth: { cyl: UNIT_CYL, sphere: UNIT_SPHERE, airfoil: AIRFOIL, head: HEAD_TUBE },
+  facet: {
+    cyl: keep(new THREE.CylinderGeometry(1, 1, 1, 6, 1).translate(0, 0.5, 0)),
+    sphere: keep(new THREE.IcosahedronGeometry(1, 1)) as THREE.BufferGeometry,
+    airfoil: keep(new THREE.BoxGeometry(2, 1, 2).translate(0, 0.5, 0)) as THREE.BufferGeometry,
+    head: keep(new THREE.CylinderGeometry(0.85, 1, 1, 6).translate(0, 0.5, 0)),
+  },
+};
+/** vrai pendant la construction d'un avatar « à facettes » (réduit le nombre de faces) */
+let FACET = false;
+/** nombre de segments selon le style (finesse en arrondi, sobriété en facettes) */
+const seg = (smooth: number, facet: number) => (FACET ? facet : smooth);
 /** Supports du décor « MyHomeRide » posé sur les deux flancs du tube diagonal. */
 const DECAL_R = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).translate(0.15, 0.52, 1.03));
 const DECAL_L = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).rotateX(Math.PI).translate(0.15, 0.52, -1.03));
@@ -247,6 +294,8 @@ interface FrameGeo {
   deep: number;
   /** hauteur où les haubans rejoignent le tube de selle (fraction, haubans plongeants) */
   stayAt: number;
+  /** silhouette particulière : 'foil' (aéro façon Scott Foil RC), 'rcrg' (gravel façon Van Rysel RCR-G) */
+  shape?: 'foil' | 'rcrg';
   /** angle du buste au-dessus de l'horizontale (degrés) */
   torso: number;
   hands: Hands;
@@ -264,9 +313,9 @@ const GEO: Record<FrameId, FrameGeo> = {
   // Route « grimpeur » (esprit Scott Addict RC) : tubes fins à profil tronqué, haubans plongeants.
   climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.26, 0.78], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.7, torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
   // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas, avant plus bas.
-  aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.27, 0.77], headTop: [0.85, 0.77], headBot: [0.893, 0.62], tube: 0.0135, deep: 2.6, stayAt: 0.6, torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
+  aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.285, 0.735], headTop: [0.85, 0.8], headBot: [0.899, 0.615], tube: 0.0135, deep: 2.6, stayAt: 0.42, shape: 'foil', torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
   // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé, avant plus haut.
-  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.27, 0.77], headTop: [0.88, 0.81], headBot: [0.925, 0.645], tube: 0.0165, deep: 1.5, stayAt: 0.68, torso: 45, hands: 'flare', stemLen: 0.09, stemAngle: -4, spacer: 0.03, saddleFwd: 0, suspension: false },
+  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.3, 0.7], headTop: [0.875, 0.83], headBot: [0.922, 0.655], tube: 0.0165, deep: 1.6, stayAt: 0.5, shape: 'rcrg', torso: 45, hands: 'flare', stemLen: 0.09, stemAngle: -4, spacer: 0.03, saddleFwd: 0, suspension: false },
   // Contre-la-montre (esprit Scott Plasma) : avant massif et intégré, prolongateurs.
   tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
   // VTT tout-suspendu 29" (esprit Scott Spark) : direction très couchée (65,5°), fourche longue,
@@ -576,7 +625,7 @@ function hairGeometry(style: 'short' | 'long' | 'ponytail'): THREE.BufferGeometr
     const back = Math.max(0, -Math.cos(phi));
     // volume un peu plus marqué à l'arrière ; cheveux longs : ils s'écartent et tombent sur la nuque
     return 1.04 + 0.02 * back + (long ? 0.55 * back * Math.max(0, th - 0.62 * Math.PI) : 0);
-  }, 64, 20);
+  }, seg(64, 22), seg(20, 7));
 }
 
 /** Barbe : des favoris jusqu'au menton ; plus épaisse vers le bas pour une barbe fournie. */
@@ -587,7 +636,7 @@ function beardGeometry(full: boolean): THREE.BufferGeometry {
   return shellPatch(-pm, pm, top, bottom, (th, phi) => {
     const k = (th - top(phi)) / Math.max(0.01, bottom(phi) - top(phi));
     return full ? 1.025 + 0.075 * Math.pow(k, 0.8) * Math.max(0.3, Math.cos(phi)) : 1.012;
-  }, 40, 12);
+  }, seg(40, 14), seg(12, 5));
 }
 
 /** Petit générateur pseudo-aléatoire stable (mêmes mèches à chaque redessin). */
@@ -645,20 +694,58 @@ function stubbleTexture(color: string): THREE.CanvasTexture {
 
 /** Tube effilé le long d'une courbe (queue-de-cheval, moustache). */
 function taperTube(curve: THREE.Curve<THREE.Vector3>, r0: number, r1: number, rings = 20, segs = 10): THREE.BufferGeometry {
-  const g = new THREE.TubeGeometry(curve, rings, 1, segs, false);
+  const g = new THREE.TubeGeometry(curve, rings, 1, seg(segs, 5), false);
   const pos = g.attributes.position as THREE.BufferAttribute;
+  const sg = seg(segs, 5);
   for (let i = 0; i <= rings; i++) {
     const t = i / rings;
     const c = curve.getPointAt(t);
     const r = r0 + (r1 - r0) * t;
-    for (let j = 0; j <= segs; j++) {
-      const k = i * (segs + 1) + j;
+    for (let j = 0; j <= sg; j++) {
+      const k = i * (sg + 1) + j;
       const v = new THREE.Vector3(pos.getX(k), pos.getY(k), pos.getZ(k)).sub(c);
       pos.setXYZ(k, c.x + v.x * r, c.y + v.y * r, c.z + v.z * r);
     }
   }
   g.computeVertexNormals();
   return g;
+}
+
+/**
+ * Fusionne les maillages fixes enfants directs d'un groupe, par matériau.
+ * Les groupes (roues, pédalier, chaussures…) et les objets à garder à part sont laissés tels quels.
+ */
+function mergeStatic(group: THREE.Object3D, keepApart: Set<THREE.Object3D>): void {
+  const byMat = new Map<THREE.Material, THREE.Mesh[]>();
+  for (const o of group.children) {
+    if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh || keepApart.has(o)) continue;
+    const m = o.material as THREE.Material;
+    if (Array.isArray(o.material)) continue;
+    if (!byMat.has(m)) byMat.set(m, []);
+    byMat.get(m)!.push(o);
+  }
+  for (const [mat, meshes] of byMat) {
+    if (meshes.length < 2) continue;
+    const geos: THREE.BufferGeometry[] = [];
+    for (const mesh of meshes) {
+      mesh.updateMatrix();
+      let g = mesh.geometry.clone();
+      if (g.index) g = g.toNonIndexed();
+      if (!g.attributes.normal) g.computeVertexNormals();
+      if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      g.applyMatrix4(mesh.matrix);
+      geos.push(g);
+    }
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    for (const mesh of meshes) {
+      group.remove(mesh);
+      if (!SHARED.has(mesh.geometry)) mesh.geometry.dispose();
+    }
+    group.add(new THREE.Mesh(merged, mat));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +774,14 @@ export class RiderModel {
   private limbR: number;
   private shadow: THREE.Mesh;
 
-  constructor(look: RiderLook, opts: { trainer?: boolean } = {}) {
+  constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean } = {}) {
+    // style de modélisation pour tout ce qui suit
+    FACET = look.style === 'facet';
+    const U = FACET ? UNITS.facet : UNITS.smooth;
+    UNIT_CYL = U.cyl;
+    UNIT_SPHERE = U.sphere;
+    AIRFOIL = U.airfoil;
+    HEAD_TUBE = U.head;
     const s = (this.s = look.heightCm / 178);
     // Corpulence : 0 pour un IMC de 22, positif au-dessus, négatif en dessous.
     const bmi = look.weightKg / Math.pow(look.heightCm / 100, 2);
@@ -701,13 +795,20 @@ export class RiderModel {
 
     // ----- Matériaux
     const own: THREE.Material[] = [];
-    const lam = (color: THREE.ColorRepresentation, extra: THREE.MeshLambertMaterialParameters = {}) => {
-      const m = new THREE.MeshLambertMaterial({ color, ...extra });
+    // Matériaux physiques (PBR) : mats (tissu, peau, caoutchouc) ou brillants (vernis, métal).
+    const lam = (color: THREE.ColorRepresentation, extra: THREE.MeshStandardMaterialParameters = {}) => {
+      const m = new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0, flatShading: FACET, ...extra });
       own.push(m);
       return m;
     };
+    /** brillant : plus la brillance est forte, plus la surface est lisse ; un reflet clair = métal */
     const shiny = (color: THREE.ColorRepresentation, shininess = 60, specular: THREE.ColorRepresentation = '#555555') => {
-      const m = new THREE.MeshPhongMaterial({ color, shininess, specular });
+      const metal = new THREE.Color(specular).getHSL({ h: 0, s: 0, l: 0 }).l > 0.7;
+      const m = new THREE.MeshStandardMaterial({
+        color, flatShading: FACET,
+        roughness: Math.max(0.12, Math.min(0.6, 1 - shininess / 110)),
+        metalness: metal ? 0.85 : 0.05,
+      });
       own.push(m);
       return m;
     };
@@ -716,8 +817,10 @@ export class RiderModel {
     const groupColor = look.groupset === 'silver' ? '#b9bec4' : '#1e2023';
     const mGroup = shiny(groupColor, look.groupset === 'silver' ? 90 : 40, look.groupset === 'silver' ? '#cccccc' : '#444444');
     const mBlack = lam('#1b1c1f');
-    const mRubber = lam('#121212');
+    const mRubber = lam('#121212', { roughness: 0.9 });
     const mTan = lam('#b98d5c');
+    const TIRE_COLORS: Record<string, string> = { blue: '#1f5fd0', red: '#c8202a', white: '#e9e9e9', yellow: '#f2c21b', green: '#2e9e4f' };
+    const mTireColor = TIRE_COLORS[look.tireWall] ? lam(TIRE_COLORS[look.tireWall], { roughness: 0.7 }) : null;
     const mRim = look.wheels === 'alu' ? shiny('#3a3d41', 50) : shiny('#1d1e20', 70, '#666666');
     const mDecalW = lam('#d9dde0', { side: THREE.DoubleSide });
     const mTape = lam(look.barTape);
@@ -734,7 +837,10 @@ export class RiderModel {
     mHelmet.side = THREE.DoubleSide; // l'intérieur des coques ouvertes reste visible
     const mHelmetDark = lam('#1a1a1a');
     const lens = LENS[look.lens] ?? LENS.dark;
-    const mLens = new THREE.MeshPhongMaterial({ color: lens.color, specular: lens.specular, shininess: 120, side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1 });
+    const mLens = new THREE.MeshStandardMaterial({
+      color: lens.color, emissive: lens.specular, emissiveIntensity: 0.08, roughness: 0.05, metalness: 0.9,
+      side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1, flatShading: FACET,
+    });
     own.push(mLens);
     const jerseyTex = jerseyTexture(look);
     const mJersey = lam('#ffffff', { map: jerseyTex });
@@ -779,13 +885,46 @@ export class RiderModel {
       bike.add(m);
       return m;
     };
+    /** tube dont la section évolue de a vers b (profondeur et largeur) */
+    const ttaper = (a: THREE.Vector3, b: THREE.Vector3, rA: number, dA: number, rB: number, dB: number, mat: THREE.Material = mFrame) => {
+      const m = new THREE.Mesh(taperedPrism(rA, dA, rB, dB, FACET), mat);
+      place(m, a, b, 1, 1);
+      bike.add(m);
+      return m;
+    };
     const ttDepth = Math.min(D, 1.4);
+    const dtEnd = headBot.clone().add(V(-0.01, -0.01));
     // triangle avant
-    ftube(bb, seatTop, T, D); // tube de selle
-    ftube(bb, headBot.clone().add(V(-0.01, -0.01)), T * 1.4, D * 0.95); // tube diagonal
-    // tube horizontal (plongeant sur le VTT : il rejoint le tube de selle bien plus bas)
-    ftube(geo.suspension ? bb.clone().lerp(seatTop, 0.8) : seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.02)), T * 0.95, ttDepth);
-    {
+    if (geo.shape === 'foil') {
+      // Foil : tube de selle qui épouse la roue (léger arc vers l'avant), tube diagonal qui
+      // s'épaissit fortement vers une douille haute, tube horizontal qui monte vers l'avant.
+      const bow = bb.clone().lerp(seatTop, 0.42).add(V(0.035, 0));
+      // profondeurs calées sur la photo du Foil : tube diagonal ≈ 6 → 8 cm, tube de selle ≈ 6 cm,
+      // douille ≈ 7 cm, tube horizontal ≈ 3,5 → 5 cm (profondeur totale = 2 × r × d)
+      ttaper(bb, bow, 0.015, 2.5, 0.0135, 2.5);
+      ttaper(bow, seatTop, 0.0135, 2.5, 0.0125, 2.0);
+      bike.add(blob(mFrame, bow, 0.034, 0.02, 0.0135));
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, 0.016, 2.0, 0.02, 2.5);
+      // « menton » : jonction massive entre tube diagonal, douille et té de fourche
+      bike.add(blob(mFrame, dtEnd.clone().add(V(-0.005, -0.01)), 0.05, 0.035, 0.02));
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.035)), 0.0115, 1.5, 0.0135, 1.9);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.06)), headTop.clone().add(V(-0.004, 0.012)), 0.02, 1.75);
+      bike.add(ht);
+    } else if (geo.shape === 'rcrg') {
+      // RCR-G : tube de selle fin, tube diagonal profond qui s'élargit vers l'avant,
+      // tube horizontal qui monte franchement vers une douille haute.
+      ttaper(bb, seatTop, T * 1.05, 1.5, T * 0.95, 1.3);
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, T * 1.35, 1.9, T * 1.5, 2.6);
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.025)), T * 0.85, 1.3, T * 1.0, 2.0);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.05)), headTop.clone().add(V(-0.004, 0.012)), T * 1.6, 1.8);
+      bike.add(ht);
+    } else {
+      ftube(bb, seatTop, T, D); // tube de selle
+      ftube(bb, dtEnd, T * 1.4, D * 0.95); // tube diagonal
+      // tube horizontal (plongeant sur le VTT : il rejoint le tube de selle bien plus bas)
+      ftube(geo.suspension ? bb.clone().lerp(seatTop, 0.8) : seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.02)), T * 0.95, ttDepth);
       // douille conique, profilée sur les cadres aéro
       const ht = new THREE.Mesh(D > 2 ? AIRFOIL : HEAD_TUBE, mFrame);
       place(ht, headBot.clone().add(V(0.005, -0.035)), headTop.clone().add(V(-0.004, 0.012)), T * (D > 2 ? 1.5 : 1.75), D > 2 ? 1.9 : 1);
@@ -798,12 +937,14 @@ export class RiderModel {
       const mWord = lam('#ffffff', { map: wordmarkTexture(look.frameColor2), transparent: true, alphaTest: 0.35, polygonOffset: true, polygonOffsetFactor: -2 });
       for (const g of [DECAL_R, DECAL_L]) {
         const m = new THREE.Mesh(g, mWord);
-        place(m, bb, headBot.clone().add(V(-0.01, -0.01)), T * 1.4, D * 0.95);
+        if (geo.shape === 'foil') place(m, bb, dtEnd, 0.0175, 2.0);
+        else if (geo.shape === 'rcrg') place(m, bb, dtEnd, T * 1.45, 2.2);
+        else place(m, bb, dtEnd, T * 1.4, D * 0.95);
         bike.add(m);
       }
     }
     // liseré de couleur 2 sur le haut du tube de selle et le bas de la fourche
-    ftube(bb.clone().lerp(seatTop, 0.88), seatTop, T * 1.04, D * 1.02, mDecal);
+    if (!geo.shape) ftube(bb.clone().lerp(seatTop, 0.88), seatTop, T * 1.04, D * 1.02, mDecal);
 
     // triangle arrière
     const pivot = bb.clone().add(V(-0.035, 0.08));
@@ -846,12 +987,14 @@ export class RiderModel {
       tube(mBlack, V(arch.x, arch.y, -0.06), V(arch.x + 0.02, arch.y + 0.02, 0), 0.014);
       tube(mBlack, V(arch.x + 0.02, arch.y + 0.02, 0), V(arch.x, arch.y, 0.06), 0.014);
     } else {
-      // fourche fuselée, té intégré dans la douille
+      // fourche fuselée, té intégré dans la douille (massif sur le Foil), couleur au choix
+      const mFork = look.forkColor ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : mFrame;
       const crown = V(headBot.x + 0.004, headBot.y - 0.04);
-      bike.add(blob(mFrame, crown, 0.03, 0.022, 0.05));
+      if (geo.shape === 'foil') bike.add(blob(mFork, crown.clone().add(V(0.004, -0.004)), 0.036, 0.026, 0.055));
+      else bike.add(blob(mFork, crown, 0.03, 0.022, 0.05));
       for (const z of [-0.055, 0.055]) {
-        const m = new THREE.Mesh(AIRFOIL, mFrame);
-        place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.7), T * 0.85, Math.min(D * 0.95, 2.4));
+        const m = new THREE.Mesh(taperedPrism(T * 0.75, 2.0, T * 1.05, geo.shape === 'foil' ? 2.6 : 2.0, FACET), mFork);
+        place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.75), 1, 1);
         bike.add(m);
       }
     }
@@ -886,7 +1029,9 @@ export class RiderModel {
       tube(mBlack, seatTop, mid, 0.017);
       tube(shiny('#2b2d30', 70, '#888888'), mid, postEnd, 0.0145);
     } else {
-      ftube(seatTop, postEnd, T * 0.95, Math.min(D, 1.9), D > 2 ? mFrame : mBlack); // tige profilée
+      if (geo.shape === 'rcrg') tube(mBlack, seatTop, postEnd, 0.0135); // tige ronde et fine
+      else if (geo.shape === 'foil') ttaper(seatTop, postEnd, 0.012, 1.9, 0.0115, 1.7); // tige aéro profonde
+      else ftube(seatTop, postEnd, T * 0.95, Math.min(D, 1.9), D > 2 ? mFrame : mBlack); // tige profilée
     }
     // selle à bec court (rembourrage + coque)
     bike.add(blob(mSaddle, saddle.clone().add(V(-0.04, 0.013)), 0.07, 0.019, 0.072));
@@ -929,7 +1074,7 @@ export class RiderModel {
           V(hd.x + 0.055, hd.y - 0.005, side * 0.045),
           V(hd.x + 0.065, hd.y + 0.035, side * 0.045),
         ]);
-        bike.add(new THREE.Mesh(new THREE.TubeGeometry(ext, 24, 0.011, 8), mBlack));
+        bike.add(new THREE.Mesh(new THREE.TubeGeometry(ext, 24, 0.011, seg(8, 4)), mBlack));
         // cornes de la base, avec levier de frein au bout
         const horn = new THREE.CatmullRomCurve3([
           V(barCenter.x, barCenter.y, side * 0.17),
@@ -937,7 +1082,7 @@ export class RiderModel {
           V(barCenter.x + 0.11, barCenter.y - 0.03, side * 0.22),
           V(barCenter.x + 0.14, barCenter.y - 0.06, side * 0.215),
         ]);
-        bike.add(new THREE.Mesh(new THREE.TubeGeometry(horn, 16, 0.013, 8), mTape));
+        bike.add(new THREE.Mesh(new THREE.TubeGeometry(horn, 16, 0.013, seg(8, 4)), mTape));
         tube(mGroup, V(barCenter.x + 0.145, barCenter.y - 0.06, side * 0.215), V(barCenter.x + 0.19, barCenter.y - 0.075, side * 0.215), 0.006, 1.6);
       }
       // base en aile
@@ -956,7 +1101,7 @@ export class RiderModel {
           V(bc.x - 0.03, bc.y + rise, -w), V(bc.x - 0.012, bc.y + rise, -0.2), V(bc.x, bc.y + 0.006, -0.08), V(bc.x, bc.y, 0),
           V(bc.x, bc.y + 0.006, 0.08), V(bc.x - 0.012, bc.y + rise, 0.2), V(bc.x - 0.03, bc.y + rise, w),
         ]);
-        bike.add(new THREE.Mesh(new THREE.TubeGeometry(bar, 40, 0.0115, 8), mBlack));
+        bike.add(new THREE.Mesh(new THREE.TubeGeometry(bar, 40, 0.0115, seg(8, 4)), mBlack));
         for (const side of [-1, 1]) {
           const g0 = V(bc.x - 0.024, bc.y + rise, side * (w - 0.13)), g1 = V(bc.x - 0.03, bc.y + rise, side * w);
           tube(mTape, g0, g1, 0.016); // poignée
@@ -984,7 +1129,7 @@ export class RiderModel {
             V(barCenter.x + 0.065, barCenter.y - 0.12, z + side * flare),
             V(barCenter.x - 0.02, barCenter.y - 0.128, z + side * flare),
           ]);
-          bike.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 30, 0.0118, 8), mTape));
+          bike.add(new THREE.Mesh(new THREE.TubeGeometry(curve, seg(30, 14), 0.0118, seg(8, 4)), mTape));
           // cocotte et levier
           const hood = V(barCenter.x + 0.08, barCenter.y + 0.012, z + side * 0.002);
           const h = blob(mBlack, hood.clone().add(V(-0.005, -0.002)), 0.042, 0.02, 0.016);
@@ -1045,7 +1190,7 @@ export class RiderModel {
       bike.add(w);
       // Disque de frein (côté gauche) et moyeu : présents même sur le trainer pour la roue avant.
       if (opts.trainer && isRear) continue;
-      w.add(new THREE.Mesh(new THREE.TorusGeometry(R - tireR, tireR, 10, 64), look.tireWall === 'tan' ? mTan : mRubber));
+      w.add(new THREE.Mesh(new THREE.TorusGeometry(R - tireR, tireR, seg(10, 6), seg(64, 24)), mTireColor ?? (look.tireWall === 'tan' ? mTan : mRubber)));
       if (look.tireWall === 'tan') w.add(new THREE.Mesh(new THREE.TorusGeometry(R - tireR * 0.55, tireR * 0.62, 8, 64), mRubber));
       // crampons (VTT et, plus fins, gravel)
       if (geo.tire >= 0.019) {
@@ -1202,11 +1347,12 @@ export class RiderModel {
     }
 
     // ----- Cycliste
+    const riderStart = this.body.children.length;
     // bassin (cuissard) et buste (maillot)
     this.body.add(blob(mShorts, hip.clone().add(V(-0.005, -0.015)), 0.12 * s * wm, 0.095 * s * wm, 0.15 * s * wm));
     const belly = Math.max(0, build - 0.3) * 0.12;
     const torsoProfile: Array<[number, number]> = [[0, 0.86], [0.18, 0.8 + belly * 0.5], [0.38, 0.86 + belly], [0.62, 0.98 + belly * 0.4], [0.82, 1], [0.93, 0.84], [1, 0.42]];
-    const torsoGeo = lathe(torsoProfile, 0, 1, 1, 18, 24);
+    const torsoGeo = lathe(torsoProfile, 0, 1, 1, seg(18, 9), seg(24, 8));
     const torso = new THREE.Mesh(torsoGeo, mJersey);
     const torsoTop = shoulder.clone().add(V(Math.cos(ta) * 0.06 * s, Math.sin(ta) * 0.06 * s));
     place(torso, hip.clone().add(V(-0.02 * s, -0.01)), torsoTop, 1);
@@ -1379,9 +1525,9 @@ export class RiderModel {
       const L1 = path.l1, L = path.length;
       const radius = (d: number) => (d < L1 ? ur * rAt(UPPER_ARM, d / L1) : fr * rAt(FOREARM, (d - L1) / path.l2));
       const shift = (d: number) => (d < L1 ? 0.12 * ur * bump(d / L1, 0.45, 0.25) : 0);
-      const skin = new FlexTube(mSkin, 22, 12);
+      const skin = new FlexTube(mSkin, seg(22, 10), seg(12, 6));
       skin.update(path, 0, L - 0.01, radius, shift);
-      const sleeve = new FlexTube(mSleeveCuff, 12, 12);
+      const sleeve = new FlexTube(mSleeveCuff, seg(12, 6), seg(12, 6));
       sleeve.update(path, 0, longSleeves ? L - 0.03 : 0.55 * L1, radius, shift, 1.1);
       this.body.add(skin.mesh, sleeve.mesh);
       // main (gant) et doigts
@@ -1396,10 +1542,10 @@ export class RiderModel {
     mShorts.side = THREE.DoubleSide;
     mSock.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
-      const skin = new FlexTube(mSkin, 34, 16);
-      const shorts = new FlexTube(mShorts, 14, 16);
-      const sock = new FlexTube(mSock, 12, 16);
-      const overshoe = look.overshoes ? new FlexTube(mShoe, 6, 16) : null;
+      const skin = new FlexTube(mSkin, seg(34, 14), seg(16, 7));
+      const shorts = new FlexTube(mShorts, seg(14, 6), seg(16, 7));
+      const sock = new FlexTube(mSock, seg(12, 5), seg(16, 7));
+      const overshoe = look.overshoes ? new FlexTube(mShoe, 4, seg(16, 7)) : null;
       const ankle = blob(look.overshoes ? mShoe : mSock, V(0, 0), 1, 1, 1);
       // chaussure : repère local centré sur l'axe de la pédale
       const foot = new THREE.Group();
@@ -1434,10 +1580,22 @@ export class RiderModel {
     this.shadow.visible = !opts.trainer;
     this.root.add(this.shadow);
 
+    if (opts.bikeOnly) {
+      // vélo seul (accroché au mur de l'atelier) : on retire le cycliste
+      for (const o of this.body.children.slice(riderStart)) this.body.remove(o);
+      this.legs = [];
+      this.headParts.length = 0;
+    }
+    this.update(0, 0);
+    // Fusion des pièces fixes par matériau : ~15 appels de dessin au lieu de ~100 par avatar.
+    const keepApart = new Set<THREE.Object3D>(this.headParts);
+    for (const l of this.legs) [l.skin.mesh, l.shorts.mesh, l.sock.mesh, l.overshoe?.mesh, l.ankle, l.foot].forEach((o) => o && keepApart.add(o));
+    mergeStatic(bike, keepApart);
+    mergeStatic(this.body, keepApart);
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh && o !== this.shadow) o.castShadow = true;
     });
-    this.update(0, 0);
+    FACET = false;
   }
 
   /** Bascule de la chaussure (rad, + = pointe vers le bas) selon l'angle du pédalier. */
@@ -1501,6 +1659,11 @@ export class RiderModel {
   /** Inclinaison du vélo selon la pente (fraction). */
   setGrade(grade: number): void {
     this.body.rotation.z = Math.atan(grade);
+  }
+
+  /** Disque d'ombre simplifié (inutile quand le soleil projette de vraies ombres). */
+  setBlobShadow(v: boolean): void {
+    this.shadow.visible = v;
   }
 
   setHeadVisible(v: boolean): void {

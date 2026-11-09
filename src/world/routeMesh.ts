@@ -19,7 +19,7 @@ const LINE = hexLinear('#e8e8e2');
 export class RouteMesh {
   readonly group = new THREE.Group();
   private chunks = new Map<number, THREE.Mesh>();
-  private material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
 
   constructor(private readonly route: Route) {}
 
@@ -96,7 +96,10 @@ export class RouteMesh {
       }
     }
     const geo = mb.build();
-    return geo ? new THREE.Mesh(geo, this.material) : null;
+    if (!geo) return null;
+    const m = new THREE.Mesh(geo, this.material);
+    m.receiveShadow = true;
+    return m;
   }
 
   dispose(): void {

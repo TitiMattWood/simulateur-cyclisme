@@ -9,8 +9,9 @@
  */
 import * as THREE from 'three';
 import type { View } from '../render/engine';
-import { createSky } from '../render/engine';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RiderModel } from '../render/riderModel';
+import { aiLook } from './ai/looks';
 import { lookFromProfile } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
@@ -83,9 +84,17 @@ export class RideView implements View {
   private params: PhysicsParams;
   private recorder = new Recorder();
   private hud: Hud | null = null;
-  private sky: THREE.Mesh;
-  private horizon = new THREE.Color('#cfe3f2');
+  private sky: Sky;
+  private sun: THREE.DirectionalLight;
+  /** direction du soleil (vers le soleil) */
+  private sunDir = new THREE.Vector3(-0.45, 0.62, 0.35).normalize();
+  /** halo léger en extérieur (reflets du soleil sur les jantes, ciel) */
+  readonly bloom = { strength: 0.18, radius: 0.4, threshold: 1.6 };
+  readonly exposure = 0.78;
+  private horizon = new THREE.Color('#b9d0e6');
   private sample = emptySample();
+  private sample2 = emptySample();
+  private preview: Array<{ model: RiderModel; offset: number; lateral: number }> = [];
   private power3: number[] = [];
   private live = { power: 0, cadence: 0, hr: 0, source: 'demo' as 'ble' | 'demo' };
   private trainerTimer = 0;
@@ -104,14 +113,38 @@ export class RideView implements View {
     private readonly cb: RideCallbacks,
   ) {
     const s = this.scene;
-    this.sky = createSky('#4f8fd6', this.horizon);
+    // Ciel physique (diffusion de Rayleigh/Mie) : bleu profond en haut, horizon laiteux, soleil.
+    this.sky = new Sky();
+    const su = this.sky.material.uniforms;
+    su.turbidity.value = 3.5;
+    su.rayleigh.value = 2.4;
+    su.mieCoefficient.value = 0.004;
+    su.mieDirectionalG.value = 0.85;
+    su.sunPosition.value.copy(this.sunDir);
+    // Le ciel de three.js est calibré pour une exposition ≈ 0,5 : on l'atténue pour notre réglage.
+    this.sky.material.fragmentShader = this.sky.material.fragmentShader.replace(
+      'gl_FragColor = vec4( retColor, 1.0 );', 'gl_FragColor = vec4( retColor * 0.42, 1.0 );');
+    this.sky.material.depthWrite = false;
+    this.sky.material.depthTest = false;
+    this.sky.renderOrder = -10;
+    this.sky.frustumCulled = false;
+    this.sky.scale.setScalar(1000);
     s.add(this.sky);
     s.fog = new THREE.Fog(this.horizon, q.nearRadius * 0.9, q.farRadius * 1.05);
     s.background = this.horizon;
-    s.add(new THREE.HemisphereLight('#d6ebff', '#5d6b3f', 1.05));
-    const sun = new THREE.DirectionalLight('#fff1db', 1.9);
-    sun.position.set(-0.5, 0.8, 0.35);
-    s.add(sun);
+    s.add(new THREE.HemisphereLight('#bcd6ff', '#55613a', 0.85));
+    // Soleil : il suit le cycliste pour que son ombre (et celle des IA) reste nette.
+    this.sun = new THREE.DirectionalLight('#fff0d6', 2.4);
+    if (q.rideShadows) {
+      this.sun.castShadow = true;
+      this.sun.shadow.mapSize.set(2048, 2048);
+      const c = this.sun.shadow.camera;
+      c.left = -18; c.right = 18; c.top = 18; c.bottom = -18; c.near = 1; c.far = 200;
+      this.sun.shadow.bias = -0.0004;
+      this.sun.shadow.normalBias = 0.04;
+      this.sun.shadow.radius = 2;
+    }
+    s.add(this.sun, this.sun.target);
     // loin : les monuments (tour Eiffel vue de Cergy) sont à près de 30 km
     this.camera.far = 60000;
     this.camera.updateProjectionMatrix();
@@ -127,6 +160,7 @@ export class RideView implements View {
     s.add(this.landmarks.group);
 
     this.rider = new RiderModel(lookFromProfile(profile));
+    this.rider.setBlobShadow(!q.rideShadows);
     s.add(this.rider.root);
     this.params = buildParams({
       weightKg: profile.weightKg, heightCm: profile.heightCm, frame: profile.frame, wheels: profile.wheels, kit: profile.kit,
@@ -297,13 +331,35 @@ export class RideView implements View {
   }
 
   private placeRider(d: number): void {
-    const s = this.track.sampleAt(d, this.sample);
+    this.placeModel(this.rider, d, 0);
+  }
+
+  /**
+   * Pose un avatar sur la route à la distance d. lateral : décalage en mètres vers la gauche
+   * (+) ou la droite (−) par rapport à la file normale (droite de la chaussée).
+   */
+  private placeModel(model: RiderModel, d: number, lateral: number): void {
+    const s = this.track.sampleAt(d, this.sample2);
     // on roule à droite de la chaussée (près de l'axe sur un sentier étroit)
     const width = this.path ? this.path.edgeAt(d).width : 6;
-    const off = Math.max(0, Math.min(1.3, width / 2 - 0.7));
-    this.rider.root.position.set(s.x - s.dirZ * off, s.ele + 0.08, s.z + s.dirX * off);
-    this.rider.root.rotation.y = Math.atan2(-s.dirZ, s.dirX);
-    this.rider.setGrade(s.grade);
+    const off = Math.max(0, Math.min(1.3, width / 2 - 0.7)) - lateral;
+    model.root.position.set(s.x - s.dirZ * off, s.ele + 0.08, s.z + s.dirX * off);
+    model.root.rotation.y = Math.atan2(-s.dirZ, s.dirX);
+    model.setGrade(s.grade);
+  }
+
+  /** Aperçu (maquettes) : un groupe d'avatars IA posés autour du cycliste, qui pédalent. */
+  previewGroup(n: number): void {
+    for (let k = 0; k < n; k++) {
+      const { look } = aiLook(k * 17 + 3, this.profile.appearance.style);
+      const m = new RiderModel(look);
+      m.setBlobShadow(!this.q.rideShadows);
+      m.crankAngle = k * 1.3;
+      this.scene.add(m.root);
+      // deux files, en quinconce, devant et derrière le joueur
+      const row = Math.floor(k / 2) - 2;
+      this.preview.push({ model: m, offset: row * 2.1 + (k % 2) * 0.9 + 1.2, lateral: k % 2 ? 0.75 : 0 });
+    }
   }
 
   update(dt: number): void {
@@ -354,11 +410,18 @@ export class RideView implements View {
 
     this.placeRider(this.dist);
     this.rider.update(dt, moving ? this.live.cadence : 0, moving ? this.dyn.v : 0);
+    for (const p of this.preview) {
+      this.placeModel(p.model, this.dist + p.offset, p.lateral);
+      p.model.update(dt, 86, this.dyn.v);
+    }
     this.world.update(this.rider.root.position.x, this.rider.root.position.z, this.dist);
     this.routeMesh?.update(this.dist);
     this.rig.update(dt, this.camContext());
     this.sky.position.copy(this.camera.position);
     this.landmarks.update(this.camera.position);
+    const rp = this.rider.root.position;
+    this.sun.target.position.copy(rp);
+    this.sun.position.copy(rp).addScaledVector(this.sunDir, 80);
 
     this.hudTimer += dt;
     if (this.hud && this.hudTimer > 0.1) {

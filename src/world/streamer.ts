@@ -57,8 +57,8 @@ export interface StreamerOptions {
 /** Marge (m) autour d'une tuile pour les routes : le replat se raccorde entre tuiles voisines. */
 const ROAD_MARGIN = 40;
 
-const terrainMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
-const featureMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const terrainMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
+const featureMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
 
 export class WorldStreamer {
   readonly group = new THREE.Group();
@@ -229,7 +229,11 @@ export class WorldStreamer {
       ortho, orthoPx: tile.level === 'near' ? this.q.orthoPx : Math.round(this.q.orthoPx * 0.75),
       water, lower: tile.level === 'far' ? 4 : 0,
     });
-    if (terrain) group.add(new THREE.Mesh(terrain, terrainMaterial));
+    if (terrain) {
+      const tm = new THREE.Mesh(terrain, terrainMaterial);
+      tm.receiveShadow = true; // l'ombre du cycliste se pose sur le sol
+      group.add(tm);
+    }
     if (feats) {
       const ex = this.opts.exclusions ?? [];
       const bat = ex.length ? feats.bat.filter((f) => !this.excluded(f, ex)) : feats.bat;
@@ -241,7 +245,11 @@ export class WorldStreamer {
       }
       const onRoute = this.index ? (x: number, z: number) => !!this.index!.nearest(x, z, ROAD_HALF_WIDTH + 1.5) : null;
       const rd = buildRoads(feats.roads, feats.rails, proj, grid, bounds, onRoute);
-      if (rd) group.add(new THREE.Mesh(rd, featureMaterial));
+      if (rd) {
+        const rm = new THREE.Mesh(rd, featureMaterial);
+        rm.receiveShadow = true;
+        group.add(rm);
+      }
       const ri = roads;
       const avoid = (x: number, z: number) => {
         const hit = ri?.nearest(x, z, 10, (d) => d.halfW);
