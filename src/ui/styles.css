@@ -291,3 +291,15 @@ button.go:disabled { background: #3a4048; box-shadow: none; }
 .podium li:nth-child(2) b::before { content: '🥈 '; }
 .podium li:nth-child(3) b::before { content: '🥉 '; }
 @media (max-width: 900px) { .board { top: auto; bottom: 170px; right: 8px; width: 180px; } .draft-box { bottom: 104px; } }
+
+/* ---------- Sprint pancarte ---------- */
+.sign-box { position: absolute; left: 50%; top: 318px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border-radius: 6px; background: #ffffff; color: #111; border: 4px solid #d0202a; font-weight: 800; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.sign-box .sb-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: #d0202a; }
+.sign-box .sb-town { font-size: 1.05rem; text-transform: uppercase; }
+.sign-box .sb-dist { font-variant-numeric: tabular-nums; font-size: 1.05rem; }
+.sign-box.live { animation: signPulse .6s ease-in-out infinite alternate; }
+@keyframes signPulse { from { box-shadow: 0 0 0 0 rgba(208,32,42,.6); } to { box-shadow: 0 0 0 10px rgba(208,32,42,0); } }
+.home-hint { position: absolute; left: 50%; transform: translateX(-50%); bottom: 34px; padding: 6px 12px; border-radius: 999px;
+  background: rgba(14,17,21,.6); color: rgba(255,255,255,.75); font-size: .75rem; pointer-events: none !important; }
+@media (max-width: 900px) { .home-hint { display: none; } }

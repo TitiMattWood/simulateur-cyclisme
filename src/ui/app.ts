@@ -75,6 +75,7 @@ export class App {
     setLang(this.save.profile.lang);
     this.engine = new Engine(canvas, QUALITY[this.save.profile.quality]);
     this.home = new HomeScene(this.look(), this.engine.environment());
+    this.home.attachControls(canvas);
     this.engine.setView(this.home);
     this.engine.start();
     this.devices.onChange = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };
@@ -124,6 +125,7 @@ export class App {
             <div class="cta-info">${ready ? `<b>${escapeHtml(ready.title)}</b><small>${escapeHtml(ready.sub)}</small>` : `<small>${t('ride.choose')}</small>`}</div>
             <button class="go" id="go" ${ready ? '' : 'disabled'}>${t('ride.go')} ▶</button>
           </div>` : ''}
+        <div class="home-hint">${t('home.hint')}</div>
         <footer class="credits">${t('credits')}</footer>
       </div>`;
     this.ui.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
@@ -205,6 +207,7 @@ export class App {
         <label>${t('setup.pace', { p: Math.round(su.pace * 100), w: Math.round(su.pace * this.profile.ftp) })}<input type="range" id="su-pace" min="50" max="90" step="5" value="${Math.round(su.pace * 100)}"></label>
         <label class="check"><input type="checkbox" id="su-wait" ${su.wait ? 'checked' : ''}> ${t('setup.wait')}</label>
         <label class="check"><input type="checkbox" id="su-relay" ${su.relay ? 'checked' : ''}> ${t('setup.relay')}</label>
+        <label class="check"><input type="checkbox" id="su-signs" ${su.signSprints ? 'checked' : ''}> ${t('setup.signSprints')}</label>
         ${wind}
       </div>` : su.mode === 'race' ? `
       <div class="mode-settings">
@@ -299,6 +302,7 @@ export class App {
     range('su-pace', (v) => ({ pace: v / 100 }));
     $<HTMLInputElement>(this.ui, '#su-wait')?.addEventListener('change', (e) => saveSetup({ wait: (e.target as HTMLInputElement).checked }, false));
     $<HTMLInputElement>(this.ui, '#su-relay')?.addEventListener('change', (e) => saveSetup({ relay: (e.target as HTMLInputElement).checked }, false));
+    $<HTMLInputElement>(this.ui, '#su-signs')?.addEventListener('change', (e) => saveSetup({ signSprints: (e.target as HTMLInputElement).checked }, false));
     $<HTMLSelectElement>(this.ui, '#su-km')?.addEventListener('change', (e) => saveSetup({ raceKm: Number((e.target as HTMLSelectElement).value) }, false));
     $<HTMLSelectElement>(this.ui, '#su-wind')?.addEventListener('change', (e) => saveSetup({ wind: (e.target as HTMLSelectElement).value as RideSetup['wind'] }));
     $<HTMLSelectElement>(this.ui, '#su-winddir')?.addEventListener('change', (e) => saveSetup({ windDir: (e.target as HTMLSelectElement).value as RideSetup['windDir'] }, false));
@@ -871,6 +875,7 @@ export class App {
       ['rep.kcal', `${fmtNum(s.kcal)} kcal`],
       ['rep.tss', fmtNum(s.tss)],
       ['rep.if', fmtNum(s.intensity, 2)],
+      ...(s.sprintWins ? [['rep.sprints', String(s.sprintWins)] as [I18nKey, string]] : []),
       ['rep.xp', `+${s.xp}`],
     ];
     document.querySelector('.modal')?.remove();

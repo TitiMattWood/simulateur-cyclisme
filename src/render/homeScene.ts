@@ -168,6 +168,66 @@ export class HomeScene implements View {
     this.anim = { kind: 'exit', t: 0, dur, from: this.tvFront(0.32), fromTarget: this.tvCenter() };
   }
 
+  // ----- Caméra libre à la souris (ou au doigt) : tourner à 360° autour du cycliste, zoomer.
+  private manual = { yaw: 0, pitch: 0.2, dist: 3.5, weight: 0, idle: 99, dragging: false };
+
+  /**
+   * Branche la souris sur le canevas 3D : clic-glisser pour tourner autour du cycliste,
+   * molette pour zoomer, double-clic pour revenir au mouvement automatique. Après 20 s sans
+   * toucher, la caméra reprend doucement son mouvement automatique.
+   */
+  attachControls(canvas: HTMLCanvasElement): void {
+    let lastX = 0, lastY = 0;
+    const start = () => {
+      if (this.manual.weight < 0.05) {
+        // on part de la position actuelle de la caméra
+        const p = this.camera.position.clone().sub(RIDER_TARGET);
+        this.manual.dist = Math.min(4.2, Math.max(1.2, p.length()));
+        this.manual.yaw = Math.atan2(p.z, p.x);
+        this.manual.pitch = Math.asin(Math.max(-0.2, Math.min(0.9, p.y / this.manual.dist)));
+      }
+      this.manual.idle = 0;
+    };
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || this.anim) return;
+      start();
+      this.manual.dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+      canvas.style.cursor = 'grabbing';
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!this.manual.dragging) return;
+      this.manual.yaw += (e.clientX - lastX) * 0.006;
+      this.manual.pitch = Math.max(-0.15, Math.min(0.85, this.manual.pitch + (e.clientY - lastY) * 0.004));
+      lastX = e.clientX;
+      lastY = e.clientY;
+      this.manual.idle = 0;
+    });
+    const end = (e: PointerEvent) => {
+      if (!this.manual.dragging) return;
+      this.manual.dragging = false;
+      canvas.releasePointerCapture(e.pointerId);
+      canvas.style.cursor = 'grab';
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', (e) => {
+      if (this.anim) return;
+      e.preventDefault();
+      start();
+      this.manual.dist = Math.min(4.2, Math.max(1.2, this.manual.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+    }, { passive: false });
+    canvas.addEventListener('dblclick', () => { this.manual.idle = 99; });
+    canvas.style.cursor = 'grab';
+  }
+
+  /** La caméra est-elle pilotée à la main ? (le moteur de rendu de la sortie l'ignore) */
+  get manualActive(): boolean {
+    return this.manual.weight > 0.01;
+  }
+
   /** Position de la caméra en orbite lente autour du vélo. */
   private orbit(out: THREE.Vector3, target: THREE.Vector3): void {
     const z = smooth(this.zoom);
@@ -195,6 +255,25 @@ export class HomeScene implements View {
     const cam = this.camera;
     const pos = new THREE.Vector3(), target = new THREE.Vector3();
     this.orbit(pos, target);
+    // caméra libre : mélange doux entre le mouvement automatique et la position choisie à la souris
+    const m = this.manual;
+    m.idle += dt;
+    const wantManual = m.dragging || m.idle < 20;
+    m.weight += ((wantManual ? 1 : 0) - m.weight) * Math.min(1, dt * (wantManual ? 6 : 0.8));
+    if (m.weight > 0.001 && !this.anim) {
+      const cp = Math.cos(m.pitch);
+      const mp = new THREE.Vector3(
+        RIDER_TARGET.x + Math.cos(m.yaw) * cp * m.dist,
+        RIDER_TARGET.y + Math.sin(m.pitch) * m.dist,
+        RIDER_TARGET.z + Math.sin(m.yaw) * cp * m.dist,
+      );
+      // on reste dans la pièce (murs, sol, plafond)
+      mp.x = Math.min(2.9, Math.max(-3.3, mp.x));
+      mp.z = Math.min(4.2, Math.max(-2.75, mp.z));
+      mp.y = Math.min(2.8, Math.max(0.35, mp.y));
+      pos.lerp(mp, m.weight);
+      target.lerp(RIDER_TARGET, m.weight);
+    }
     let shift = this.shift;
     if (this.anim) {
       const a = this.anim;

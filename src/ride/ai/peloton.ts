@@ -52,7 +52,8 @@ export interface PlayerState {
 
 /** Annonce affichée à l'écran (clé de traduction + paramètres). */
 export interface PelotonEvent {
-  key: 'ev.attack' | 'ev.break' | 'ev.caught' | 'ev.sprint' | 'ev.relay' | 'ev.waiting' | 'ev.dropped' | 'ev.finish';
+  key: 'ev.attack' | 'ev.break' | 'ev.caught' | 'ev.sprint' | 'ev.relay' | 'ev.waiting' | 'ev.dropped' | 'ev.finish'
+    | 'ev.signSprint' | 'ev.signWon' | 'ev.signLost';
   name?: string;
 }
 
@@ -83,6 +84,8 @@ export class AiRider {
   state: AiState = 'pack';
   stateT = 0;
   finishTime: number | null = null;
+  /** sprint pancarte : distance du panneau visé (le coureur sprinte jusqu'à le passer) */
+  sprintTarget: number | null = null;
 
   constructor(
     readonly id: number,
@@ -239,6 +242,22 @@ export class Peloton {
     return Math.min(base * k, leader.maxPower);
   }
 
+  /**
+   * Sprint pancarte : les coureurs qui en ont envie (et de l'énergie) sprintent jusqu'au panneau.
+   * Les sprinteurs y vont toujours, les autres une fois sur deux.
+   */
+  startSignSprint(target: number): void {
+    for (const r of this.riders) {
+      if (r.state === 'finished' || r.dist > target) continue;
+      const keen = r.kind === 'sprinter' ? 1 : r.kind === 'rouleur' ? 0.55 : 0.4;
+      if (r.energy > 0.35 && this.rnd() < keen) {
+        r.state = 'sprint';
+        r.sprintTarget = target;
+        r.stateT = 0;
+      }
+    }
+  }
+
   /** Le joueur a fait demi-tour (trajet libre) : le groupe aussi, et revient vers lui. */
   onPlayerUTurn(playerDist: number): void {
     for (const r of this.riders) {
@@ -357,6 +376,11 @@ export class Peloton {
       const p = r.spend(target, dt);
       const v = r.dyn.step(dt, p, c, road.vmax);
       r.dist += v * dt;
+      // sprint pancarte terminé : on se relève et on reprend sa place
+      if (r.sprintTarget !== null && r.dist > r.sprintTarget + 25) {
+        r.sprintTarget = null;
+        if (r.state === 'sprint') r.state = 'pack';
+      }
       if (env.finish !== null && r.finishTime === null && r.dist >= env.finish) {
         r.finishTime = this.elapsed;
         r.state = 'finished';
