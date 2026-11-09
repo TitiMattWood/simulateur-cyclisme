@@ -15,6 +15,7 @@ import { aiLook } from './ai/looks';
 import { Peloton, type RankEntry, type PelotonEnv } from './ai/peloton';
 import { defaultSetup, WIND_SPEED, type RideSetup } from './setup';
 import { RaceHud } from '../ui/raceHud';
+import { SignSprints, SPRINT_DISTANCE, SPRINT_XP } from './signSprint';
 import { lookFromProfile } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
@@ -114,6 +115,13 @@ export class RideView implements View {
   private finishTime: number | null = null;
   /** distance d'arrivée d'une course en trajet libre */
   private raceFinish: number | null = null;
+  /** sprints pancartes (sortie en groupe) */
+  private sprints: SignSprints | null = null;
+  private signModels = new Map<number, THREE.Group>();
+  /** XP gagnés en plus de la sortie (sprints) */
+  private bonusXp = 0;
+  /** nombre de sprints pancartes gagnés */
+  sprintWins = 0;
   private power3: number[] = [];
   private live = { power: 0, cadence: 0, hr: 0, source: 'demo' as 'ble' | 'demo' };
   private trainerTimer = 0;
@@ -285,6 +293,94 @@ export class RideView implements View {
       finish: this.raceFinish,
     };
     this.raceHud = new RaceHud(this.overlay);
+    if (su.mode === 'group' && su.signSprints) this.sprints = new SignSprints(this.track, this.net);
+  }
+
+  /** Panneau d'entrée d'agglomération (blanc à bord rouge, nom de la commune), au bord droit de la route. */
+  private makeSign(name: string): THREE.Group {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 220;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 512, 220);
+    g.strokeStyle = '#d0202a';
+    g.lineWidth = 22;
+    g.strokeRect(14, 14, 484, 192);
+    g.fillStyle = '#111111';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    let size = 74;
+    const label = name.toUpperCase();
+    do { g.font = `700 ${size}px "Arial Narrow", Arial, sans-serif`; size -= 4; } while (g.measureText(label).width > 430 && size > 28);
+    g.fillText(label, 256, 112);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const grp = new THREE.Group();
+    const panelMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6 });
+    const backMat = new THREE.MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.5, metalness: 0.4 });
+    // panneau 1,4 m × 0,6 m, face vers le cycliste qui arrive (−X local)
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 1.4), [backMat, panelMat, backMat, backMat, backMat, backMat]);
+    panel.position.set(0, 2.1, 0);
+    // l'image doit se lire depuis −X : on retourne le panneau
+    panel.rotation.y = Math.PI;
+    grp.add(panel);
+    const post = new THREE.MeshStandardMaterial({ color: '#8d9297', roughness: 0.4, metalness: 0.7 });
+    for (const z of [-0.5, 0.5]) {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.4, 8), post);
+      p.position.set(0.03, 1.2, z);
+      grp.add(p);
+    }
+    grp.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
+    return grp;
+  }
+
+  /** Sprints pancartes : détection, annonce à 300 m, sprint du groupe, vainqueur. */
+  private updateSprints(dt: number): void {
+    const sp = this.sprints;
+    if (!sp || !this.peloton) return;
+    sp.update(dt, this.dist);
+    const sign = sp.next(this.dist);
+    // panneaux visibles : posés au bord droit de la route
+    for (const s of sp.signs) {
+      if (s.state === 'done' && s.dist < this.dist - 150) {
+        const m = this.signModels.get(s.dist);
+        if (m) { this.scene.remove(m); this.signModels.delete(s.dist); }
+        continue;
+      }
+      if (!this.signModels.has(s.dist)) {
+        const m = this.makeSign(s.name);
+        const p = this.track.sampleAt(s.dist, this.sample2);
+        const width = this.path ? this.path.edgeAt(s.dist).width : 6;
+        const off = width / 2 + 1.2;
+        m.position.set(p.x - p.dirZ * off, (this.world?.groundAt(p.x - p.dirZ * off, p.z + p.dirX * off) ?? p.ele), p.z + p.dirX * off);
+        m.rotation.y = Math.atan2(-p.dirZ, p.dirX);
+        this.scene.add(m);
+        this.signModels.set(s.dist, m);
+      }
+    }
+    if (!sign) return;
+    const toGo = sign.dist - this.dist;
+    if (sign.state === 'ahead' && toGo <= SPRINT_DISTANCE) {
+      sign.state = 'sprint';
+      this.peloton.startSignSprint(sign.dist);
+      this.raceHud?.announce({ key: 'ev.signSprint', name: sign.name });
+    }
+    if (sign.state === 'sprint') {
+      // le premier à passer le panneau gagne
+      const ai = this.peloton.riders.filter((r) => r.dist >= sign.dist).sort((a, b) => b.dist - a.dist)[0];
+      if (this.dist >= sign.dist && (!ai || ai.dist - sign.dist < this.dist - sign.dist)) {
+        sign.state = 'done';
+        sign.playerWon = true;
+        sign.winner = this.profile.name || t('rep.you');
+        this.bonusXp += SPRINT_XP;
+        this.sprintWins++;
+        this.raceHud?.announce({ key: 'ev.signWon', name: sign.name });
+      } else if (ai) {
+        sign.state = 'done';
+        sign.winner = ai.name;
+        this.raceHud?.announce({ key: 'ev.signLost', name: ai.name });
+      }
+    }
   }
 
   /** Vent de face (m/s) et vent de côté (venant de la gauche, m/s) pour une direction de route. */
@@ -337,12 +433,16 @@ export class RideView implements View {
     if (this.state === 'finished') return;
     this.state = 'finished';
     const summary = this.recorder.summarize(this.track.name, this.profile.ftp);
+    summary.xp += this.bonusXp;
+    summary.sprintWins = this.sprintWins;
     this.cb.onFinish(summary, this.recorder.samples, this.ranking());
   }
 
   /** Trajet libre : direction au prochain carrefour (−1 gauche, +1 droite). */
   turn(delta: number): void {
     this.path?.choose(this.dist, delta);
+    // le parcours devant change : les pancartes repérées plus loin ne sont plus sur la route
+    this.sprints?.forgetAhead(this.dist);
   }
 
   /** Trajet libre : demi-tour. */
@@ -482,6 +582,7 @@ export class RideView implements View {
         this.peloton.step(dt, me, this.pelEnv);
         this.playerDraft = this.peloton.playerDraft;
         for (const e of this.peloton.takeEvents()) this.raceHud?.announce(e);
+        this.updateSprints(dt);
       } else {
         this.playerDraft = 1;
       }
@@ -565,6 +666,10 @@ export class RideView implements View {
           speed: this.dyn.v,
           remaining: this.raceFinish !== null ? this.raceFinish - this.dist : null,
           crosswind: Math.abs(this.peloton.yaw) > 0.12,
+          sign: (() => {
+            const sg = this.sprints?.next(this.dist);
+            return sg && sg.state !== 'done' && sg.dist - this.dist < 900 ? { name: sg.name, dist: sg.dist - this.dist, live: sg.state === 'sprint' } : null;
+          })(),
         });
       }
     }

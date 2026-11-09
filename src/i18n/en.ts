@@ -312,4 +312,11 @@ export const en: Record<keyof typeof fr, string> = {
   'click.error': 'connection failed',
   'pf.neonOn': 'Neon lights on',
   'pf.neonColor': 'Neon colour',
+  'ev.signSprint': 'Town sign sprint: {name} in 300 m!',
+  'ev.signWon': 'You took the {name} sign! +30 XP',
+  'ev.signLost': '{name} takes the sign',
+  'race.signSprint': 'Town sign sprint',
+  'setup.signSprints': 'Town sign sprints (+30 XP per win)',
+  'rep.sprints': 'Town sign sprints won',
+  'home.hint': 'Drag to look around · scroll to zoom · double-click to reset',
 };

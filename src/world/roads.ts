@@ -83,6 +83,8 @@ export interface RoadEdge {
   bridge: boolean;
   /** 1 = sens unique a→b, −1 = sens unique b→a, 0 = double sens */
   oneway: number;
+  /** tronçon en agglomération (entre les panneaux d'entrée et de sortie de ville) */
+  urban: boolean;
 }
 
 export interface RoadNode {
@@ -133,6 +135,7 @@ export class RoadNetwork {
           importance: Number.isFinite(imp) ? imp : 6,
           bridge: Number(p.position_par_rapport_au_sol ?? 0) > 0,
           oneway: sens === 'Sens direct' ? 1 : sens === 'Sens inverse' ? -1 : 0,
+          urban: p.urbain === true || p.urbain === 'true',
         };
         if (edge.name === 'null') edge.name = '';
         this.edges.set(edge.id, edge);

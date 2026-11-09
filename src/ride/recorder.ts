@@ -38,6 +38,8 @@ export interface RideSummary {
   tss: number;
   intensity: number;
   xp: number;
+  /** sprints pancartes gagnés pendant la sortie */
+  sprintWins?: number;
   ftp: number;
 }
 

@@ -24,10 +24,12 @@ export interface RideSetup {
   raceKm: number;
   wind: WindStrength;
   windDir: WindDir;
+  /** sortie en groupe : sprints aux pancartes d'entrée de ville */
+  signSprints: boolean;
 }
 
 export function defaultSetup(): RideSetup {
-  return { mode: 'free', riders: 6, pace: 0.65, wait: true, relay: true, level: 1, raceKm: 20, wind: 'none', windDir: 'cross' };
+  return { mode: 'free', riders: 6, pace: 0.65, wait: true, relay: true, level: 1, raceKm: 20, wind: 'none', windDir: 'cross', signSprints: true };
 }
 
 /** Vitesse du vent (m/s) selon la force choisie. */

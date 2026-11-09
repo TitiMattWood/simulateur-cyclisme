@@ -19,6 +19,8 @@ export interface RaceHudState {
   remaining: number | null;
   /** vent de côté marqué (bordure possible) */
   crosswind: boolean;
+  /** prochaine pancarte d'entrée de ville (sprint), ou null */
+  sign?: { name: string; dist: number; live: boolean } | null;
 }
 
 export class RaceHud {
@@ -38,6 +40,7 @@ export class RaceHud {
         <div class="draft-bar"><div data-q="dbar"></div></div>
       </div>
       <div class="hud-box board" data-q="board"></div>
+      <div class="sign-box" data-q="sign"></div>
       <div class="race-toast" data-q="toast"></div>`;
     parent.appendChild(this.el);
     const q = (k: string) => this.el.querySelector(`[data-q="${k}"]`) as HTMLElement;
@@ -45,7 +48,10 @@ export class RaceHud {
     this.draftText = q('dtext');
     this.board = q('board');
     this.toast = q('toast');
+    this.signBox = q('sign');
   }
+
+  private signBox: HTMLElement;
 
   /** Affiche une annonce quelques secondes. */
   announce(e: PelotonEvent): void {
@@ -56,6 +62,11 @@ export class RaceHud {
   }
 
   update(s: RaceHudState): void {
+    if (s.sign) {
+      this.signBox.style.display = '';
+      this.signBox.className = `sign-box${s.sign.live ? ' live' : ''}`;
+      this.signBox.innerHTML = `<span class="sb-title">${t('race.signSprint')}</span><span class="sb-town">${escapeHtml(s.sign.name)}</span><span class="sb-dist">${Math.max(0, Math.round(s.sign.dist))} m</span>`;
+    } else this.signBox.style.display = 'none';
     const gain = Math.max(0, 1 - s.draft);
     this.draftBar.style.width = `${Math.min(100, (gain / 0.48) * 100)}%`;
     this.draftBar.className = gain > 0.25 ? 'strong' : gain > 0.08 ? 'mid' : '';

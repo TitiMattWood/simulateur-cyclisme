@@ -310,4 +310,11 @@ export const fr = {
   'click.error': 'échec de connexion',
   'pf.neonOn': 'Néons allumés',
   'pf.neonColor': 'Couleur des néons',
+  'ev.signSprint': 'Sprint pancarte : {name} à 300 m !',
+  'ev.signWon': 'Pancarte {name} gagnée ! +30 XP',
+  'ev.signLost': '{name} remporte la pancarte',
+  'race.signSprint': 'Sprint pancarte',
+  'setup.signSprints': 'Sprints pancartes à l\'entrée des villes (+30 XP par victoire)',
+  'rep.sprints': 'Sprints pancartes gagnés',
+  'home.hint': 'Clic-glisser pour tourner autour · molette pour zoomer · double-clic pour revenir',
 };
