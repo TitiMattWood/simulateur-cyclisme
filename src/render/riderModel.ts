@@ -315,7 +315,7 @@ const GEO: Record<FrameId, FrameGeo> = {
   // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas, avant plus bas.
   aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.285, 0.735], headTop: [0.85, 0.8], headBot: [0.899, 0.615], tube: 0.0135, deep: 2.6, stayAt: 0.42, shape: 'foil', torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
   // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé, avant plus haut.
-  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.3, 0.7], headTop: [0.875, 0.83], headBot: [0.922, 0.655], tube: 0.0165, deep: 1.6, stayAt: 0.5, shape: 'rcrg', torso: 45, hands: 'flare', stemLen: 0.09, stemAngle: -4, spacer: 0.03, saddleFwd: 0, suspension: false },
+  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.3, 0.7], headTop: [0.882, 0.8], headBot: [0.922, 0.655], tube: 0.0165, deep: 1.6, stayAt: 0.5, shape: 'rcrg', torso: 45, hands: 'flare', stemLen: 0.095, stemAngle: -8, spacer: 0.012, saddleFwd: 0, suspension: false },
   // Contre-la-montre (esprit Scott Plasma) : avant massif et intégré, prolongateurs.
   tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
   // VTT tout-suspendu 29" (esprit Scott Spark) : direction très couchée (65,5°), fourche longue,
@@ -775,13 +775,17 @@ export class RiderModel {
   private shadow: THREE.Mesh;
 
   constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean } = {}) {
-    // style de modélisation pour tout ce qui suit
-    FACET = look.style === 'facet';
-    const U = FACET ? UNITS.facet : UNITS.smooth;
-    UNIT_CYL = U.cyl;
-    UNIT_SPHERE = U.sphere;
-    AIRFOIL = U.airfoil;
-    HEAD_TUBE = U.head;
+    // Le vélo est toujours modélisé en style arrondi ; le cycliste suit le style choisi.
+    const facetRider = look.style === 'facet';
+    const useUnits = (facet: boolean) => {
+      FACET = facet;
+      const U = facet ? UNITS.facet : UNITS.smooth;
+      UNIT_CYL = U.cyl;
+      UNIT_SPHERE = U.sphere;
+      AIRFOIL = U.airfoil;
+      HEAD_TUBE = U.head;
+    };
+    useUnits(false);
     const s = (this.s = look.heightCm / 178);
     // Corpulence : 0 pour un IMC de 22, positif au-dessus, négatif en dessous.
     const bmi = look.weightKg / Math.pow(look.heightCm / 100, 2);
@@ -991,9 +995,11 @@ export class RiderModel {
       const mFork = look.forkColor ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : mFrame;
       const crown = V(headBot.x + 0.004, headBot.y - 0.04);
       if (geo.shape === 'foil') bike.add(blob(mFork, crown.clone().add(V(0.004, -0.004)), 0.036, 0.026, 0.055));
-      else bike.add(blob(mFork, crown, 0.03, 0.022, 0.05));
+      else bike.add(blob(mFork, crown, 0.026, 0.018, 0.05));
+      const slim = geo.shape === 'rcrg';
       for (const z of [-0.055, 0.055]) {
-        const m = new THREE.Mesh(taperedPrism(T * 0.75, 2.0, T * 1.05, geo.shape === 'foil' ? 2.6 : 2.0, FACET), mFork);
+        // fourreaux fins qui s'affinent vers l'axe (≈ 2 cm × 3,5 cm sous le té sur le gravel)
+        const m = new THREE.Mesh(taperedPrism(slim ? 0.0085 : T * 0.75, slim ? 1.6 : 2.0, slim ? 0.0105 : T * 1.05, slim ? 1.75 : geo.shape === 'foil' ? 2.6 : 2.0, FACET), mFork);
         place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.75), 1, 1);
         bike.add(m);
       }
@@ -1348,6 +1354,11 @@ export class RiderModel {
 
     // ----- Cycliste
     const riderStart = this.body.children.length;
+    useUnits(facetRider);
+    for (const m of [mSkin, mShorts, mSock, mShoe, mSole, mDial, mGlove, mHair, mHelmet, mHelmetDark, mLens, mJersey, mSleeveCuff, mShoulder]) {
+      m.flatShading = facetRider;
+      m.needsUpdate = true;
+    }
     // bassin (cuissard) et buste (maillot)
     this.body.add(blob(mShorts, hip.clone().add(V(-0.005, -0.015)), 0.12 * s * wm, 0.095 * s * wm, 0.15 * s * wm));
     const belly = Math.max(0, build - 0.3) * 0.12;

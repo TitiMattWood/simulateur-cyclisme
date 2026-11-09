@@ -13,17 +13,17 @@ export function livingRoom(): RoomSetup {
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
   // ----- Structure
-  box(g, texMat(woodFloor(['#d8b98f', '#cfae84', '#e0c39c', '#c9a77c'], 60, 2), 0.5), 0, -0.05, 0.6, 7.2, 0.1, 7.6, false);
-  const wall = std('#efe9df', 0.95);
+  box(g, texMat(woodFloor(['#a98458', '#9c784e', '#b28d61', '#94714a'], 60, 2), 0.72), 0, -0.05, 0.6, 7.2, 0.1, 7.6, false);
+  const wall = std('#cfc6b8', 0.95);
   box(g, wall, 3.35, 1.5, 0.6, 0.1, 3, 7.6, false);
   box(g, wall, -3.55, 1.5, 0.6, 0.1, 3, 7.6, false);
-  box(g, std('#f6f3ee', 0.95), 0, 3.02, 0.6, 7.2, 0.06, 7.6, false);
+  box(g, std('#d8d2c8', 0.95), 0, 3.02, 0.6, 7.2, 0.06, 7.6, false);
   // mur du fond percé d'une baie vitrée (de x = −3 à x = 1,4)
   box(g, wall, 2.4, 1.5, -3.05, 2.0, 3, 0.1, false);
   box(g, wall, -3.25, 1.5, -3.05, 0.5, 3, 0.1, false);
   box(g, wall, -0.8, 2.85, -3.05, 4.4, 0.3, 0.1, false);
   box(g, wall, -0.8, 0.12, -3.05, 4.4, 0.24, 0.1, false);
-  const view = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 3.2), new THREE.MeshBasicMaterial({ map: outdoorView(true), toneMapped: false }));
+  const view = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 3.2), new THREE.MeshBasicMaterial({ map: outdoorView(true), color: new THREE.Color(0.78, 0.78, 0.78) }));
   view.position.set(-0.8, 1.6, -4.2);
   g.add(view);
   const frame = std('#2b2d30', 0.4, 0.5);
@@ -34,7 +34,7 @@ export function livingRoom(): RoomSetup {
   aoEdge(g, V(3.3, 0, -3), V(3.3, 0, 4.4), V(-1, 0, 0));
   aoEdge(g, V(-3.5, 0, -3), V(-3.5, 0, 4.4), V(1, 0, 0));
   // voilages
-  for (const x of [-3.2, 1.55]) box(g, std('#f4f1ea', 0.95, 0, { transparent: true, opacity: 0.85 }), x, 1.5, -2.92, 0.35, 2.7, 0.04, false);
+  for (const x of [-3.2, 1.55]) box(g, std('#e3ddd2', 0.95, 0, { transparent: true, opacity: 0.85 }), x, 1.5, -2.92, 0.35, 2.7, 0.04, false);
 
   // ----- Meuble TV et TV
   const oak = std('#b98d5c', 0.55);
@@ -51,7 +51,7 @@ export function livingRoom(): RoomSetup {
   box(g, fabric, -3.35, 0.65, 1.2, 0.25, 0.6, 2.4); // dossier
   for (const z of [0.05, 2.35]) box(g, fabric, -3.05, 0.4, z, 0.85, 0.5, 0.2); // accoudoirs
   for (const z of [0.6, 1.8]) box(g, std('#e3c567', 0.95), -3.2, 0.62, z, 0.15, 0.35, 0.4); // coussins
-  box(g, std('#ece7df', 0.9), -2.2, 0.01, 1.2, 1.8, 0.02, 2.4, false); // tapis
+  box(g, std('#b9b0a2', 0.95), -2.2, 0.01, 1.2, 1.8, 0.02, 2.4, false); // tapis
   box(g, oak, -2.25, 0.38, 1.2, 0.6, 0.04, 1.0);
   for (const z of [0.78, 1.62]) for (const x of [-2.5, -2.0]) box(g, std('#222', 0.4, 0.5), x, 0.18, z, 0.03, 0.36, 0.03);
 
@@ -68,8 +68,8 @@ export function livingRoom(): RoomSetup {
   const fanAnim = fan(g, 1.6, -1.6, -2.1);
 
   // ----- Lumières : soleil par la baie (ombres), ciel par la fenêtre, appoint doux
-  g.add(new THREE.HemisphereLight('#dbeaff', '#b59a78', 0.9));
-  const sun = new THREE.DirectionalLight('#fff0d8', 3.2);
+  g.add(new THREE.HemisphereLight('#dbeaff', '#8f7a60', 0.5));
+  const sun = new THREE.DirectionalLight('#ffe9cc', 2.0);
   sun.position.set(-1.6, 4.2, -6.5);
   sun.target.position.set(0.4, 0, 0.4);
   sun.castShadow = true;
@@ -80,11 +80,11 @@ export function livingRoom(): RoomSetup {
   sun.shadow.normalBias = 0.02;
   sun.shadow.radius = 3;
   g.add(sun, sun.target);
-  areaStrip(g, '#e8f2ff', 4, V(-0.8, 1.5, -2.95), 4.4, 2.4, V(-0.8, 1.2, 1));
+  areaStrip(g, '#e8f2ff', 1.6, V(-0.8, 1.5, -2.95), 4.4, 2.4, V(-0.8, 1.2, 1));
 
   return {
-    group: g, tv, background: '#dfe8ef', exposure: 0.95,
-    bloom: { strength: 0.3, radius: 0.4, threshold: 1.1 },
+    group: g, tv, background: '#cfd8df', exposure: 0.85,
+    bloom: { strength: 0.15, radius: 0.4, threshold: 2.0 },
     update: (t) => fanAnim(t),
   };
 }

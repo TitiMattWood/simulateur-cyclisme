@@ -83,7 +83,7 @@ const FRAME_DEFAULT: Record<FrameId, string> = {
 
 export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
   return {
-    style: 'smooth',
+    style: 'facet',
     room: 'neon',
     skin: SKIN_TONES[1],
     hair: 'short',
