@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import {
   type RoomSetup, std, glow, texMat, concrete, bricks, outdoorView, aoEdge, box, cyl, plant, fan, tvBezel, shelfWithItems,
-  areaStrip, canvas, tex,
+  areaStrip, canvas, tex, type NeonSetting,
 } from './common';
 
 /** Texture de l'enseigne : texte en tube néon (cœur clair + halo coloré), fond transparent. */
@@ -28,7 +28,7 @@ function neonSign(text: string, color: string): THREE.CanvasTexture {
   return t;
 }
 
-export function industrialLoft(): RoomSetup {
+export function industrialLoft(neon: NeonSetting = { color: '#ff4fa8', on: true }): RoomSetup {
   const g = new THREE.Group();
   const tv = { x: 3.12, y: 1.42, w: 1.65, h: 0.93 };
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -60,11 +60,13 @@ export function industrialLoft(): RoomSetup {
 
   // ----- Enseigne néon sur les briques
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), new THREE.MeshBasicMaterial({
-    map: neonSign('MyHomeRide', '#ff4fa8'), transparent: true, toneMapped: false, color: new THREE.Color(2.2, 2.2, 2.2),
+    // éteinte : le tube reste visible, gris et sans éclat
+    map: neonSign('MyHomeRide', neon.on ? neon.color : '#6b6b6b'), transparent: true, toneMapped: false,
+    color: neon.on ? new THREE.Color(1.5, 1.5, 1.5) : new THREE.Color(0.35, 0.35, 0.35),
   }));
   sign.position.set(0.6, 2.3, -2.98);
   g.add(sign);
-  areaStrip(g, '#ff4fa8', 7, V(0.6, 2.3, -2.9), 2.4, 0.5, V(0.6, 1.2, 1));
+  if (neon.on) areaStrip(g, neon.color, 7, V(0.6, 2.3, -2.9), 2.4, 0.5, V(0.6, 1.2, 1));
 
   // ----- Étagère industrielle (acier + bois), fauteuil en cuir
   const wood = std('#8a5a33', 0.6);

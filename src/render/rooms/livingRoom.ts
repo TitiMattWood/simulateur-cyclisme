@@ -4,10 +4,10 @@
  */
 import * as THREE from 'three';
 import {
-  type RoomSetup, std, texMat, woodFloor, outdoorView, aoEdge, box, cyl, plant, fan, tvBezel, shelfWithItems, areaStrip,
+  type RoomSetup, std, texMat, woodFloor, outdoorView, aoEdge, box, cyl, plant, fan, tvBezel, shelfWithItems, areaStrip, type NeonSetting,
 } from './common';
 
-export function livingRoom(): RoomSetup {
+export function livingRoom(neon: NeonSetting = { color: '#ffb36b', on: true }): RoomSetup {
   const g = new THREE.Group();
   const tv = { x: 3.15, y: 1.32, w: 1.65, h: 0.93 };
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -81,6 +81,8 @@ export function livingRoom(): RoomSetup {
   sun.shadow.radius = 3;
   g.add(sun, sun.target);
   areaStrip(g, '#e8f2ff', 1.6, V(-0.8, 1.5, -2.95), 4.4, 2.4, V(-0.8, 1.2, 1));
+  // ruban LED derrière la TV (couleur et interrupteur au profil)
+  if (neon.on) areaStrip(g, neon.color, 3, V(3.3, tv.y, 0), tv.w + 0.3, tv.h + 0.3, V(2.5, tv.y, 0));
 
   return {
     group: g, tv, background: '#cfd8df', exposure: 0.85,

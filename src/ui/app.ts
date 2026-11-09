@@ -535,6 +535,10 @@ export class App {
         ${sel('pf-style', 'pf.style', ['smooth', 'facet'] as const, a.style, tr('style'))}
       </div>
       <div class="grid2">
+        ${check('pf-neonon', 'pf.neonOn', a.neonOn)}
+        ${color('pf-neon', 'pf.neonColor', a.neonColor)}
+      </div>
+      <div class="grid2">
         ${sel('pf-quality', 'pf.quality', ['low', 'medium', 'high'] as const, p.quality, tr('q'))}
         ${sel('pf-lang', 'pf.lang', ['fr', 'en'] as const, p.lang, (v) => (v === 'fr' ? 'Français' : 'English'))}
       </div>`;
@@ -597,6 +601,8 @@ export class App {
       forkColor: chk('pf-forkon') ? val('pf-fork') : '',
       room: val('pf-room') as Appearance['room'],
       style: val('pf-style') as Appearance['style'],
+      neonOn: chk('pf-neonon'),
+      neonColor: val('pf-neon'),
     };
     return {
       ...p,

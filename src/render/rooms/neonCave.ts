@@ -5,10 +5,10 @@
 import * as THREE from 'three';
 import {
   type RoomSetup, std, texMat, woodFloor, mountainMural, aoEdge, box, cyl, plant, fan,
-  tvBezel, shelfWithItems, areaStrip, rng,
+  tvBezel, shelfWithItems, areaStrip, rng, neighbourHue, type NeonSetting,
 } from './common';
 
-export function neonCave(): RoomSetup {
+export function neonCave(neon: NeonSetting = { color: '#ff3d9a', on: true }): RoomSetup {
   const g = new THREE.Group();
   const tv = { x: 3.12, y: 1.32, w: 1.5, h: 0.85 };
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -77,12 +77,13 @@ export function neonCave(): RoomSetup {
 
   // ----- Tapis et ventilateur
   box(g, std('#1c1d22', 0.95), 0.55, 0.006, 0, 2.6, 0.012, 1.4, false);
-  box(g, std('#d63c86', 0.6), 0.55, 0.007, 0, 2.62, 0.01, 1.42, false).scale.set(1, 1, 1);
+  box(g, std(neon.on ? neon.color : '#3a3b42', 0.6), 0.55, 0.007, 0, 2.62, 0.01, 1.42, false);
   box(g, std('#1c1d22', 0.95), 0.55, 0.013, 0, 2.5, 0.006, 1.3, false);
   const fanAnim = fan(g, 1.6, -1.6, -2.1);
 
   // ----- Lumières : peu d'ambiance, rubans LED colorés, un projecteur sur le vélo
-  g.add(new THREE.HemisphereLight('#8c7cbf', '#1a1418', 0.35));
+  // néons éteints : un peu plus de lumière d'ambiance pour ne pas rester dans le noir
+  g.add(new THREE.HemisphereLight('#8c7cbf', '#1a1418', neon.on ? 0.35 : 0.75));
   const key = new THREE.SpotLight('#ffe9d6', 8, 12, 0.6, 0.55, 1.6);
   key.position.set(1.2, 2.9, 2.2);
   key.target.position.set(0.4, 0.6, 0);
@@ -92,11 +93,14 @@ export function neonCave(): RoomSetup {
   key.shadow.radius = 4;
   g.add(key, key.target);
   // ruban rose en haut du mur du fond, violet en haut du mur de l'écran, rose sous le bureau
-  areaStrip(g, '#ff3d9a', 14, V(0, 2.92, -2.85), 6.8, 0.1, V(0, 1.2, 0), { size: [6.8, 0.03, 0.03], at: V(0, 2.95, -2.97) });
-  areaStrip(g, '#8f5cff', 14, V(3.2, 2.92, 0.6), 7.2, 0.1, V(0, 1.2, 0.6), { size: [0.03, 0.03, 7.2], at: V(3.27, 2.95, 0.6) });
-  areaStrip(g, '#ff3d9a', 6, V(2.95, 0.7, 0.1), 3.4, 0.08, V(1.5, 0, 0.1), { size: [0.02, 0.02, 3.4], at: V(2.6, 0.71, 0.1) });
-  // lueur derrière l'écran
-  areaStrip(g, '#6a5cff', 5, V(3.3, tv.y, 0), tv.w + 0.3, tv.h + 0.3, V(2.5, tv.y, 0));
+  if (neon.on) {
+    const c1 = neon.color, c2 = neighbourHue(neon.color);
+    areaStrip(g, c1, 14, V(0, 2.92, -2.85), 6.8, 0.1, V(0, 1.2, 0), { size: [6.8, 0.03, 0.03], at: V(0, 2.95, -2.97) });
+    areaStrip(g, c2, 14, V(3.2, 2.92, 0.6), 7.2, 0.1, V(0, 1.2, 0.6), { size: [0.03, 0.03, 7.2], at: V(3.27, 2.95, 0.6) });
+    areaStrip(g, c1, 6, V(2.95, 0.7, 0.1), 3.4, 0.08, V(1.5, 0, 0.1), { size: [0.02, 0.02, 3.4], at: V(2.6, 0.71, 0.1) });
+    // lueur derrière l'écran
+    areaStrip(g, c2, 5, V(3.3, tv.y, 0), tv.w + 0.3, tv.h + 0.3, V(2.5, tv.y, 0));
+  }
   // lueur des étagères
   areaStrip(g, '#ffb36b', 3, V(1.65, 1.93, -2.8), 2.2, 0.06, V(1.65, 0, -2.6));
 

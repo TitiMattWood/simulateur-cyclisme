@@ -308,4 +308,6 @@ export const fr = {
   'click.connecting': 'connexion…',
   'click.connected': 'connectée',
   'click.error': 'échec de connexion',
+  'pf.neonOn': 'Néons allumés',
+  'pf.neonColor': 'Couleur des néons',
 };
