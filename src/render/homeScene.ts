@@ -1,17 +1,23 @@
 /**
- * Décor de l'écran d'accueil : l'avatar pédale sur son home trainer, face à une grande TV
- * qui affiche une route qui défile. La caméra tourne lentement autour du vélo.
+ * Accueil : l'avatar pédale sur son home trainer, face à une grande TV qui montre une route
+ * qui défile, dans le décor choisi au profil (pain cave néon, atelier, salon, loft).
+ * La caméra tourne lentement autour du vélo.
  *
  * - Onglet Profil : la caméra se rapproche du cycliste pour voir l'équipement.
- * - « Rouler » : la caméra plonge dans l'écran de la TV (enterTv), puis la sortie démarre.
+ * - « C'est parti » : la caméra plonge dans l'écran de la TV (enterTv), puis la sortie démarre.
  * - Retour de sortie : la caméra ressort de la TV (exitTv).
  */
 import * as THREE from 'three';
 import type { View } from './engine';
+import type { BloomStyle } from './post';
 import { RiderModel, type RiderLook } from './riderModel';
+import type { RoomId } from './look';
+import type { RoomSetup } from './rooms/common';
+import { neonCave } from './rooms/neonCave';
+import { workshop } from './rooms/workshop';
+import { livingRoom } from './rooms/livingRoom';
+import { industrialLoft } from './rooms/industrialLoft';
 
-/** Écran de la TV (centre, taille) dans le repère de la pièce. */
-const TV = { x: 3.15, y: 1.4, w: 1.65, h: 0.93 };
 /** Point regardé par la caméra (milieu du cycliste). */
 const RIDER_TARGET = new THREE.Vector3(0.5, 0.95, 0);
 
@@ -30,10 +36,27 @@ interface CamAnim {
 const smooth = (x: number) => x * x * (3 - 2 * x);
 const easeInOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 
+function buildRoom(id: RoomId, style: RiderLook['style']): RoomSetup {
+  switch (id) {
+    case 'workshop': return workshop(style);
+    case 'living': return livingRoom();
+    case 'loft': return industrialLoft();
+    case 'neon':
+    default: return neonCave();
+  }
+}
+
 export class HomeScene implements View {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(40, 1, 0.03, 100);
+  bloom: BloomStyle = { strength: 0.5, radius: 0.5, threshold: 0.8 };
+  /** réglage d'exposition propre au décor (lu par le moteur) */
+  exposure = 1;
   private rider: RiderModel;
+  private room!: RoomSetup;
+  private roomId: RoomId | null = null;
+  private roomStyle: RiderLook['style'] | null = null;
+  private screen: THREE.Mesh;
   private t = 0;
   private tvCanvas: HTMLCanvasElement;
   private tvCtx: CanvasRenderingContext2D;
@@ -44,114 +67,66 @@ export class HomeScene implements View {
   private zoom = 0;
   private anim: CamAnim | null = null;
   private size = { w: 1, h: 1 };
-  /** décalage horizontal du cadrage, pour laisser la place au panneau de droite */
+  /** décalage horizontal du cadrage, pour laisser la place au panneau de gauche */
   private shift = 0;
   private camTarget = RIDER_TARGET.clone();
-  private fan: THREE.Group;
+  /** le moteur est prévenu quand le décor change (halo, exposition) */
+  onRoomChange?: () => void;
 
-  constructor(look: RiderLook) {
-    const s = this.scene;
-    s.background = new THREE.Color('#1c2026');
-    s.add(new THREE.HemisphereLight('#fff4e6', '#4a4038', 0.9));
-    // lumière du jour par la fenêtre (porte les ombres)
-    const sun = new THREE.DirectionalLight('#ffe7c4', 1.7);
-    sun.position.set(-2.5, 4.5, -3.5);
-    sun.target.position.set(0.5, 0, 0);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    const sc = sun.shadow.camera;
-    sc.left = -2.5; sc.right = 2.5; sc.top = 2.5; sc.bottom = -2.5; sc.near = 1; sc.far = 12;
-    sun.shadow.bias = -0.0008;
-    sun.shadow.normalBias = 0.02;
-    s.add(sun, sun.target);
-    // lueur de la TV et lampe chaude
-    const glow = new THREE.PointLight('#9cc8ff', 3.5, 6, 1.6);
-    glow.position.set(TV.x - 0.5, TV.y, 0);
-    s.add(glow);
-    const lamp = new THREE.PointLight('#ffc98a', 4, 7, 1.6);
-    lamp.position.set(-2.6, 2.1, 2.4);
-    s.add(lamp);
-
-    const m = (c: string) => new THREE.MeshLambertMaterial({ color: c });
-    const add = (mesh: THREE.Mesh, x: number, y: number, z: number, receive = true) => {
-      mesh.position.set(x, y, z);
-      mesh.receiveShadow = receive;
-      s.add(mesh);
-      return mesh;
-    };
-    // sol en parquet (lames dessinées) et murs
-    add(new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.1, 7.5), new THREE.MeshLambertMaterial({ map: parquetTexture() })), 0, -0.05, 0.4);
-    add(new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.015, 1.3), m('#2b2f35')), 0.55, 0.008, 0); // tapis de home trainer
-    add(new THREE.Mesh(new THREE.BoxGeometry(7.2, 3.2, 0.1), m('#d8d1c4')), 0, 1.6, -3.0); // mur du fond (fenêtre)
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.2, 7.5), m('#cbd3d8')), 3.3, 1.6, 0.4); // mur de la TV
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.2, 7.5), m('#d3ccbf')), -3.5, 1.6, 0.4); // mur arrière
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 7.4), m('#f2efe8')), 3.24, 0.06, 0.4); // plinthe
-
-    // fenêtre avec vue sur des collines
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 1.35), new THREE.MeshBasicMaterial({ map: windowTexture() }));
-    win.position.set(-1.0, 1.75, -2.94);
-    s.add(win);
-    for (const [w, h, x, y] of [[2.0, 0.07, 0, 0.7], [2.0, 0.07, 0, -0.7], [0.07, 1.47, 0.98, 0], [0.07, 1.47, -0.98, 0], [0.045, 1.35, 0, 0]] as const) {
-      add(new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.07), m('#f4f1ea')), -1.0 + x, 1.75 + y, -2.92, false);
-    }
-
-    // TV murale : cadre, écran vivant, meuble et barre de son
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.05, TV.h + 0.05, TV.w + 0.05), new THREE.MeshPhongMaterial({ color: '#0d0e10', shininess: 80 })), TV.x + 0.07, TV.y, 0, false);
+  constructor(look: RiderLook, envMap: THREE.Texture | null = null) {
+    this.scene.environment = envMap;
     [this.tvCanvas, this.tvCtx] = makeCanvas(512, 288);
     this.tvTex = new THREE.CanvasTexture(this.tvCanvas);
     this.tvTex.colorSpace = THREE.SRGBColorSpace;
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(TV.w, TV.h), new THREE.MeshBasicMaterial({ map: this.tvTex, toneMapped: false }));
-    screen.position.set(TV.x + 0.04, TV.y, 0);
-    screen.rotation.y = -Math.PI / 2;
-    s.add(screen);
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 2.0), m('#6e5640')), 3.03, 0.25, 0);
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.9), m('#1a1b1e')), 3.1, 0.54, 0);
-
-    // étagère avec coupes, plante, ventilateur, lampe, tableau
-    add(new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.04, 0.28), m('#8a6a4c')), -2.0, 1.5, -2.82);
-    for (const [x, c, h] of [[-2.45, '#d4af37', 0.22], [-2.05, '#c0c0c0', 0.17], [-1.7, '#cd7f32', 0.14]] as const) {
-      const cup = add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.03, h, 12), new THREE.MeshPhongMaterial({ color: c, shininess: 90, specular: '#ffffff' })), x, 1.52 + h / 2, -2.82, false);
-      cup.castShadow = true;
-    }
-    const pot = add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.38, 14), m('#b5654a')), -2.85, 0.19, -2.4);
-    pot.castShadow = true;
-    for (const [dx, dy, dz, r] of [[0, 0.75, 0, 0.36], [0.15, 0.62, 0.12, 0.26], [-0.14, 0.66, -0.1, 0.28], [0.05, 1.0, -0.05, 0.22]] as const) {
-      const leaf = add(new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), new THREE.MeshLambertMaterial({ color: '#4f8a3c', flatShading: true })), -2.85 + dx, dy, -2.4 + dz, false);
-      leaf.castShadow = true;
-    }
-    this.fan = new THREE.Group();
-    const fanBase = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.0, 8), m('#3b4048'));
-    fanBase.position.y = 0.5;
-    const fanFoot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.04, 16), m('#3b4048'));
-    fanFoot.position.y = 0.02;
-    const cage = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.012, 6, 28), m('#d7dade'));
-    cage.position.y = 1.05;
-    cage.rotation.y = Math.PI / 2;
-    const blades = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.01, 3), new THREE.MeshLambertMaterial({ color: '#cfd6dd', transparent: true, opacity: 0.55 }));
-    blades.rotation.z = Math.PI / 2;
-    blades.position.y = 1.05;
-    blades.name = 'blades';
-    this.fan.add(fanBase, fanFoot, cage, blades);
-    this.fan.position.set(1.5, 0, -1.35);
-    this.fan.rotation.y = -2.0;
-    this.fan.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
-    s.add(this.fan);
-    add(new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.18, 1.7, 10), m('#2c2f33')), -2.6, 0.85, 2.4, false);
-    add(new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.24, 0.3, 16), new THREE.MeshLambertMaterial({ color: '#fff1d6', emissive: '#7a5a2a' })), -2.6, 1.85, 2.4, false);
-    add(new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.7, 1.0), m('#2d4a6b')), -3.43, 1.8, 0.2, false); // tableau
-
+    // écran lumineux : non affecté par le tone mapping, il « bave » légèrement grâce au halo
+    this.screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ map: this.tvTex, toneMapped: false, color: new THREE.Color(1.25, 1.25, 1.25) }),
+    );
+    this.screen.rotation.y = -Math.PI / 2;
+    this.scene.add(this.screen);
     this.rider = new RiderModel(look, { trainer: true });
-    s.add(this.rider.root);
+    this.scene.add(this.rider.root);
+    this.setRoom(look.room ?? 'neon', look.style);
     this.drawTv(0);
     this.update(0);
   }
 
-  /** Change l'apparence de l'avatar (couleurs, matériel). */
+  /** Change de décor (sans toucher à l'avatar). */
+  setRoom(id: RoomId, style: RiderLook['style'] = 'smooth'): void {
+    if (id === this.roomId && style === this.roomStyle) return;
+    if (this.room) {
+      this.scene.remove(this.room.group);
+      this.room.group.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          const m = o.material as THREE.Material & { map?: THREE.Texture | null };
+          m.map?.dispose();
+          m.dispose();
+        }
+      });
+    }
+    this.roomId = id;
+    this.roomStyle = style;
+    this.room = buildRoom(id, style);
+    this.scene.add(this.room.group);
+    this.scene.background = new THREE.Color(this.room.background);
+    this.scene.environmentIntensity = id === 'neon' || id === 'loft' ? 0.35 : 0.6;
+    this.bloom = this.room.bloom;
+    this.exposure = this.room.exposure;
+    const tv = this.room.tv;
+    this.screen.position.set(tv.x, tv.y, 0);
+    this.screen.scale.set(tv.w, tv.h, 1);
+    this.onRoomChange?.();
+  }
+
+  /** Change l'apparence de l'avatar (couleurs, matériel) et, si besoin, le décor. */
   setLook(look: RiderLook): void {
     this.scene.remove(this.rider.root);
     this.rider.dispose();
     this.rider = new RiderModel(look, { trainer: true });
     this.scene.add(this.rider.root);
+    this.setRoom(look.room ?? 'neon', look.style);
   }
 
   /** Cadrage : pièce entière, ou gros plan sur le cycliste (onglet Profil). */
@@ -161,8 +136,21 @@ export class HomeScene implements View {
 
   resize(w: number, h: number): void {
     this.size = { w, h };
-    // Sur grand écran, le panneau de réglages (≈ 460 px) occupe la droite : on décale l'image.
-    this.shift = w > 900 ? 230 : 0;
+    // Sur grand écran, le panneau de réglages (≈ 440 px) occupe la gauche : on décale l'image vers la droite.
+    this.shift = w > 900 ? -210 : 0;
+  }
+
+  private get tvPos() {
+    return this.room.tv;
+  }
+
+  /** Point situé à `d` mètres devant l'écran, dans l'axe. */
+  private tvFront(d: number): THREE.Vector3 {
+    return new THREE.Vector3(this.tvPos.x - d, this.tvPos.y, 0);
+  }
+
+  private tvCenter(): THREE.Vector3 {
+    return new THREE.Vector3(this.tvPos.x, this.tvPos.y, 0);
   }
 
   /** Plonge la caméra dans l'écran de la TV. La promesse se résout quand l'écran remplit la vue. */
@@ -174,26 +162,25 @@ export class HomeScene implements View {
 
   /** Ressort de la TV vers la vue de la pièce (retour de sortie). */
   exitTv(dur = 1.6): void {
-    this.anim = { kind: 'exit', t: 0, dur, from: tvFront(0.32), fromTarget: tvCenter() };
+    this.anim = { kind: 'exit', t: 0, dur, from: this.tvFront(0.32), fromTarget: this.tvCenter() };
   }
 
   /** Position de la caméra en orbite lente autour du vélo. */
   private orbit(out: THREE.Vector3, target: THREE.Vector3): void {
     const z = smooth(this.zoom);
-    // Angle autour du vélo : de 3/4 avant-droit à 3/4 arrière (la TV apparaît derrière le cycliste).
-    const base = 1.95 - z * 0.25;
-    const swing = 0.6 - z * 0.25;
+    // De 3/4 avant-gauche à 3/4 arrière : la TV apparaît à droite, derrière le cycliste.
+    const base = 2.0 - z * 0.35;
+    const swing = 0.32 - z * 0.12;
     const a = base + Math.sin(this.t * 0.1) * swing;
-    const r = 3.4 - z * 0.75;
-    out.set(RIDER_TARGET.x + Math.cos(a) * r, 1.45 - z * 0.15 + Math.sin(this.t * 0.2) * 0.06, Math.sin(a) * r);
-    target.copy(RIDER_TARGET).add(new THREE.Vector3(0.25 * (1 - z), 0.05 - z * 0.05, 0));
+    const r = 3.9 - z * 1.15;
+    out.set(RIDER_TARGET.x + Math.cos(a) * r, 1.4 - z * 0.12 + Math.sin(this.t * 0.2) * 0.05, Math.sin(a) * r);
+    target.copy(RIDER_TARGET).add(new THREE.Vector3(0.35 * (1 - z), 0.08 - z * 0.06, 0));
   }
 
   update(dt: number): void {
     this.t += dt;
     this.rider.update(dt, 82);
-    const blades = this.fan.getObjectByName('blades');
-    if (blades) blades.rotation.x += dt * 18;
+    this.room.update?.(this.t);
     // écran de la TV rafraîchi ~30 fois par seconde
     this.tvClock += dt;
     if (this.tvClock > 1 / 30) {
@@ -214,12 +201,11 @@ export class HomeScene implements View {
       if (a.kind === 'enter') {
         // trajectoire courbe : on passe au-dessus de l'épaule du cycliste, puis droit dans l'écran
         const ctrl = new THREE.Vector3(1.4, 1.95, a.from.z * 0.35);
-        bezier(a.from, ctrl, tvFront(0.32), e, pos);
-        target.copy(a.fromTarget).lerp(tvCenter(), smooth(Math.min(1, p * 1.4)));
+        bezier(a.from, ctrl, this.tvFront(0.32), e, pos);
+        target.copy(a.fromTarget).lerp(this.tvCenter(), smooth(Math.min(1, p * 1.4)));
         shift *= 1 - smooth(Math.min(1, p * 1.5));
         a.onProgress?.(p);
         if (p >= 1) {
-          this.anim = null;
           // on reste collé à l'écran jusqu'au changement de vue
           this.anim = { kind: 'enter', t: a.dur, dur: a.dur, from: a.from, fromTarget: a.fromTarget };
           a.resolve?.();
@@ -236,7 +222,7 @@ export class HomeScene implements View {
     cam.position.copy(pos);
     this.camTarget.copy(target);
     cam.lookAt(target);
-    if (shift > 0.5) cam.setViewOffset(this.size.w, this.size.h, shift, 0, this.size.w, this.size.h);
+    if (Math.abs(shift) > 0.5) cam.setViewOffset(this.size.w, this.size.h, shift, 0, this.size.w, this.size.h);
     else cam.clearViewOffset();
   }
 
@@ -314,15 +300,6 @@ export class HomeScene implements View {
   }
 }
 
-function tvCenter(): THREE.Vector3 {
-  return new THREE.Vector3(TV.x, TV.y, 0);
-}
-
-/** Point situé à `d` mètres devant l'écran, dans l'axe. */
-function tvFront(d: number): THREE.Vector3 {
-  return new THREE.Vector3(TV.x - d, TV.y, 0);
-}
-
 function bezier(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, t: number, out: THREE.Vector3): THREE.Vector3 {
   const u = 1 - t;
   return out.set(
@@ -339,46 +316,3 @@ function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingCo
   return [c, c.getContext('2d')!];
 }
 
-function parquetTexture(): THREE.CanvasTexture {
-  const [c, g] = makeCanvas(512, 512);
-  const tones = ['#9a7652', '#8c6a48', '#a47f59', '#94704c', '#87653f'];
-  for (let row = 0; row < 16; row++) {
-    let x = -((row * 97) % 180);
-    while (x < 512) {
-      const len = 140 + ((row * 31 + x) % 90);
-      g.fillStyle = tones[(row * 7 + Math.abs(x)) % tones.length];
-      g.fillRect(x, row * 32, len, 32);
-      g.fillStyle = 'rgba(0,0,0,0.18)';
-      g.fillRect(x, row * 32, 2, 32);
-      x += len;
-    }
-    g.fillStyle = 'rgba(0,0,0,0.22)';
-    g.fillRect(0, row * 32, 512, 1.5);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(3, 3);
-  t.anisotropy = 8;
-  return t;
-}
-
-function windowTexture(): THREE.CanvasTexture {
-  const [c, g] = makeCanvas(256, 180);
-  const sky = g.createLinearGradient(0, 0, 0, 120);
-  sky.addColorStop(0, '#7db7ea');
-  sky.addColorStop(1, '#d9ecf7');
-  g.fillStyle = sky;
-  g.fillRect(0, 0, 256, 180);
-  g.fillStyle = '#9cbf7d';
-  g.beginPath();
-  g.moveTo(0, 180); g.lineTo(0, 110); g.quadraticCurveTo(70, 70, 140, 105); g.quadraticCurveTo(200, 130, 256, 95); g.lineTo(256, 180);
-  g.fill();
-  g.fillStyle = '#6f9a52';
-  g.beginPath();
-  g.moveTo(0, 180); g.lineTo(0, 140); g.quadraticCurveTo(110, 115, 256, 145); g.lineTo(256, 180);
-  g.fill();
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}

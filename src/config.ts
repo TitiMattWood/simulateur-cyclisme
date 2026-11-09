@@ -38,11 +38,15 @@ export interface QualityPreset {
   orthoPx: number;
   pixelRatio: number;
   antialias: boolean;
+  /** post-traitement : 0 = aucun, 1 = halo léger, 2 = halo riche + ombres très douces */
+  post: 0 | 1 | 2;
+  /** ombres portées en sortie (soleil qui suit le cycliste) */
+  rideShadows: boolean;
 }
 
 export const QUALITY: Record<'low' | 'medium' | 'high', QualityPreset> = {
-  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, orthoPx: 48, pixelRatio: 1, antialias: false },
-  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, orthoPx: 64, pixelRatio: 1.25, antialias: true },
-  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, orthoPx: 96, pixelRatio: 2, antialias: true },
+  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, orthoPx: 48, pixelRatio: 1, antialias: false, post: 0, rideShadows: false },
+  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, orthoPx: 64, pixelRatio: 1.25, antialias: true, post: 1, rideShadows: true },
+  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, orthoPx: 96, pixelRatio: 2, antialias: true, post: 2, rideShadows: true },
 };
 export type QualityLevel = keyof typeof QUALITY;

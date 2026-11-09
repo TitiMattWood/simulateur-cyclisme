@@ -26,11 +26,11 @@ interface Item {
   /** point de référence pour la brume (position du monument) */
   center: THREE.Vector3;
   /** matériaux « lointains » teintés par la brume à la main (la brume de la scène s'arrête trop tôt) */
-  far: Array<{ mat: THREE.MeshLambertMaterial; base: THREE.Color }>;
+  far: Array<{ mat: THREE.MeshStandardMaterial; base: THREE.Color }>;
   spin?: THREE.Object3D;
 }
 
-const lambert = (color: string, far = false) => new THREE.MeshLambertMaterial({ color, flatShading: true, fog: !far });
+const lambert = (color: string, far = false) => new THREE.MeshStandardMaterial({ color, flatShading: true, fog: !far, roughness: 0.85 });
 
 export class Landmarks {
   readonly group = new THREE.Group();
@@ -146,7 +146,7 @@ export class Landmarks {
   }
 
   /** Groupe dont l'axe local +X suit une direction donnée (angle en degrés depuis l'est, vers le nord positif). */
-  private oriented(deg: number, mats: THREE.MeshLambertMaterial[]): { g: THREE.Group; item: Item } {
+  private oriented(deg: number, mats: THREE.MeshStandardMaterial[]): { g: THREE.Group; item: Item } {
     const g = new THREE.Group();
     g.rotation.y = (deg * Math.PI) / 180;
     return { g, item: { obj: g, center: new THREE.Vector3(), far: mats.map((m) => ({ mat: m, base: m.color.clone() })) } };
@@ -242,7 +242,7 @@ export class Landmarks {
 
   /** Pyramide du Louvre (21,6 m, base 35 m), alignée sur l'axe historique. */
   private louvre(): Item {
-    const glass = new THREE.MeshLambertMaterial({ color: '#9fb7c9', flatShading: true, fog: false, transparent: true, opacity: 0.85 });
+    const glass = new THREE.MeshStandardMaterial({ color: '#9fb7c9', flatShading: true, fog: false, transparent: true, opacity: 0.85, roughness: 0.2, metalness: 0.4 });
     const { g, item } = this.oriented(154.7, [glass]);
     g.add(new THREE.Mesh(new THREE.ConeGeometry(25, 21.6, 4).rotateY(Math.PI / 4).translate(0, 10.8, 0), glass));
     return item;

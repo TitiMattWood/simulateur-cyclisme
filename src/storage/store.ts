@@ -11,6 +11,7 @@ import type { RideSummary } from '../ride/recorder';
 import type { QualityLevel } from '../config';
 import type { Lang } from '../i18n';
 import { defaultAppearance, type Appearance } from '../render/look';
+import { defaultSetup, type RideSetup } from '../ride/setup';
 
 export interface Profile {
   name: string;
@@ -26,6 +27,8 @@ export interface Profile {
   helmetColor: string;
   /** apparence détaillée : cycliste, tenue, vélo (voir render/look.ts) */
   appearance: Appearance;
+  /** derniers réglages de sortie (mode, groupe, course, vent) */
+  rideSetup: RideSetup;
   lang: Lang;
   quality: QualityLevel;
   /** part de la pente réellement envoyée au trainer (1 = 100 %) */
@@ -68,6 +71,7 @@ export function defaultProfile(): Profile {
     jerseyColor2: '#1d3557',
     helmetColor: '#f1faee',
     appearance: defaultAppearance(),
+    rideSetup: defaultSetup(),
     lang: 'fr',
     quality: 'medium',
     trainerDifficulty: 1,
@@ -106,6 +110,7 @@ function normalize(raw: unknown): SaveData {
       kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) },
       drivetrain: { ...base.profile.drivetrain, ...(r.profile?.drivetrain ?? {}) },
       appearance: { ...base.profile.appearance, ...migrated, ...(rp.appearance ?? {}) },
+      rideSetup: { ...base.profile.rideSetup, ...(rp.rideSetup ?? {}) },
     },
     history: Array.isArray(r.history) ? r.history : [],
     xp: typeof r.xp === 'number' ? r.xp : 0,

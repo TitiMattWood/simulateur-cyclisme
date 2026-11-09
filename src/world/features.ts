@@ -198,7 +198,7 @@ function getTreeGeos(): Record<TreeKind, THREE.BufferGeometry> {
   return treeGeos;
 }
 
-const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const treeMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
 
 /** Place les arbres dans les zones de végétation de la tuile (instanciation : 1 appel GPU par espèce). */
 export function buildVegetation(

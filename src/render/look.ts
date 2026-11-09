@@ -18,10 +18,16 @@ export type SockHeight = 'low' | 'mid' | 'high';
 export type Gloves = 'none' | 'mitts' | 'full';
 export type Sleeves = 'short' | 'long';
 export type Groupset = 'black' | 'silver';
-export type TireWall = 'black' | 'tan';
+export type TireWall = 'black' | 'tan' | 'blue' | 'red' | 'white' | 'yellow' | 'green';
+export type AvatarStyle = 'smooth' | 'facet';
+export type RoomId = 'neon' | 'workshop' | 'living' | 'loft';
 export type Finish = 'gloss' | 'matte';
 
 export interface Appearance {
+  /** style de modélisation de l'avatar et du vélo */
+  style: AvatarStyle;
+  /** décor de la page d'accueil */
+  room: RoomId;
   // ----- Cycliste
   skin: string;
   hair: HairStyle;
@@ -44,6 +50,8 @@ export interface Appearance {
   frameColor: string;
   /** couleur des décors du cadre (bandes, logo générique) */
   frameColor2: string;
+  /** couleur de la fourche ('' = comme le cadre), par exemple jaune sur le Van Rysel RCR-G */
+  forkColor: string;
   finish: Finish;
   groupset: Groupset;
   barTape: string;
@@ -75,6 +83,8 @@ const FRAME_DEFAULT: Record<FrameId, string> = {
 
 export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
   return {
+    style: 'facet',
+    room: 'neon',
     skin: SKIN_TONES[1],
     hair: 'short',
     hairColor: HAIR_COLORS[1],
@@ -92,6 +102,7 @@ export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
     sockHeight: 'high',
     frameColor: FRAME_DEFAULT[frame],
     frameColor2: '#f1f1f1',
+    forkColor: '',
     finish: 'gloss',
     groupset: 'black',
     barTape: '#1a1a1a',

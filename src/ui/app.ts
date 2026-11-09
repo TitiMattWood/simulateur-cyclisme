@@ -8,6 +8,7 @@ import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearan
 import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
+import { ZwiftClick } from '../devices/zwiftClick';
 import { loadSave, writeSave, exportBackup, importBackup, type SaveData, type Profile } from '../storage/store';
 import { parseGpx } from '../geo/gpx';
 import { Route } from '../geo/route';
@@ -17,7 +18,7 @@ import { encodeFit } from '../export/fit';
 import { encodeGpx } from '../export/gpx';
 import { downloadFile, safeFilename } from '../export/download';
 import { levelFromXp } from '../ride/metrics';
-import { buildParams } from '../physics/model';
+import { buildParams, steadySpeed, airDensity, crrFor, type RiderSetup } from '../physics/model';
 import { CAM_MODES } from '../render/cameras';
 import { ROUTES, type RouteEntry, type WorldId } from '../data/routes';
 import { START_POINTS } from '../data/startPoints';
@@ -27,6 +28,8 @@ import { t, setLang, type I18nKey, type Lang } from '../i18n';
 import { escapeHtml, fmtKm, fmtNum, fmtTime } from './format';
 import type { FrameId, WheelId } from '../physics/equipment';
 import { CHAINRINGS, CASSETTES, TIRES, type TireId } from '../physics/gears';
+import type { RideMode, RideSetup } from '../ride/setup';
+import type { RankEntry } from '../ride/ai/peloton';
 
 type Tab = 'ride' | 'devices' | 'profile' | 'history';
 
@@ -52,6 +55,8 @@ export class App {
   private engine: Engine;
   private home: HomeScene;
   private devices = new DeviceManager();
+  /** manette Zwift Click en Bluetooth direct (expérimental) */
+  private click = new ZwiftClick();
   private ui: HTMLElement;
   private tab: Tab = 'ride';
   private selection: Selection | null = null;
@@ -69,10 +74,13 @@ export class App {
     this.save = loadSave();
     setLang(this.save.profile.lang);
     this.engine = new Engine(canvas, QUALITY[this.save.profile.quality]);
-    this.home = new HomeScene(this.look());
+    this.home = new HomeScene(this.look(), this.engine.environment());
     this.engine.setView(this.home);
     this.engine.start();
     this.devices.onChange = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };
+    this.click.onStatus = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };
+    // boutons + / − de la manette : vitesse virtuelle plus dure / plus souple
+    this.click.onShift = (dir) => this.ride?.shift(dir);
     if (!this.save.profile.configured) {
       this.tab = 'profile';
       this.message = t('pf.welcome');
@@ -93,23 +101,29 @@ export class App {
 
   private renderHome(): void {
     const lvl = levelFromXp(this.save.xp);
-    const tabs: Tab[] = ['ride', 'devices', 'profile', 'history'];
+    const tabs: Tab[] = ['ride', 'profile', 'devices', 'history'];
+    const ready = this.tab === 'ride' ? this.ctaTarget() : null;
     this.ui.innerHTML = `
       <div class="home">
-        <header class="brand">
-          <h1>${APP_NAME}</h1>
-          <p>${t('app.tagline')}</p>
+        <header class="topbar">
+          <div class="logo">MyHomeRide<span>by Titi</span></div>
+          <nav class="tabs">${tabs.map((k) => `<button data-tab="${k}" class="${k === this.tab ? 'active' : ''}">${t(`tab.${k}` as I18nKey)}</button>`).join('')}</nav>
           <div class="level">
-            <b>${t('hist.level', { n: lvl.level })}</b>
-            <div class="xpbar"><div style="width:${(lvl.into / lvl.needed) * 100}%"></div></div>
-            <small>${t('hist.xp', { xp: lvl.into, need: lvl.needed })}</small>
+            <span class="lvl-badge">${lvl.level}</span>
+            <div><b>${escapeHtml(this.profile.name || t('hist.level', { n: lvl.level }))}</b>
+              <div class="xpbar"><div style="width:${(lvl.into / lvl.needed) * 100}%"></div></div>
+              <small>${t('hist.xp', { xp: lvl.into, need: lvl.needed })}</small></div>
           </div>
         </header>
         <aside class="panel">
-          <nav class="tabs">${tabs.map((k) => `<button data-tab="${k}" class="${k === this.tab ? 'active' : ''}">${t(`tab.${k}` as I18nKey)}</button>`).join('')}</nav>
           ${this.message ? `<div class="message">${escapeHtml(this.message)}</div>` : ''}
           <div class="tab-body">${this.renderTab()}</div>
         </aside>
+        ${this.tab === 'ride' ? `
+          <div class="cta">
+            <div class="cta-info">${ready ? `<b>${escapeHtml(ready.title)}</b><small>${escapeHtml(ready.sub)}</small>` : `<small>${t('ride.choose')}</small>`}</div>
+            <button class="go" id="go" ${ready ? '' : 'disabled'}>${t('ride.go')} ▶</button>
+          </div>` : ''}
         <footer class="credits">${t('credits')}</footer>
       </div>`;
     this.ui.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) =>
@@ -121,8 +135,33 @@ export class App {
         this.renderHome();
       }),
     );
+    $(this.ui, '#go')?.addEventListener('click', () => this.go());
     this.bindTab();
     this.home.setFocus(this.tab === 'profile' ? 'rider' : 'room');
+  }
+
+  /** Ce que lancera le bouton « C'est parti » : un parcours choisi, ou un départ en trajet libre. */
+  private ctaTarget(): { title: string; sub: string } | null {
+    const mode = t(`mode.${this.setup.mode}` as I18nKey);
+    if (this.selection) {
+      return { title: this.selection.name, sub: `${mode} · ${fmtKm(this.selection.distance, 1)} km · ${fmtNum(this.selection.ascent)} m D+` };
+    }
+    if (this.freeStart) return { title: this.freeStart.name, sub: `${mode} · ${t('free.title')}` };
+    return null;
+  }
+
+  private go(): void {
+    const sel = this.selection;
+    if (sel) {
+      const gpx = parseGpx(sel.gpx, sel.name);
+      this.startRide({ kind: 'gpx', route: Route.fromPoints(sel.name, gpx.points) });
+    } else if (this.freeStart) {
+      this.startRide({ kind: 'open', ...this.freeStart });
+    }
+  }
+
+  private get setup(): RideSetup {
+    return this.profile.rideSetup;
   }
 
   private renderTab(): string {
@@ -149,7 +188,41 @@ export class App {
     const hot = new Set(['95', '21', '73', '38']);
     const worlds: WorldId[] = ['valdoise', 'cotedor', 'montagne'];
     const sel = this.selection;
+    const su = this.setup;
+    const modes: Array<{ id: RideMode | 'workout'; icon: string }> = [
+      { id: 'free', icon: '🚴' }, { id: 'group', icon: '👥' }, { id: 'race', icon: '🏁' }, { id: 'workout', icon: '📈' },
+    ];
+    const opt = <T extends string | number>(values: readonly T[], cur: T, label: (v: T) => string) =>
+      values.map((v) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${escapeHtml(label(v))}</option>`).join('');
+    const wind = `
+      <div class="grid2">
+        <label>${t('setup.wind')}<select id="su-wind">${opt(['none', 'light', 'strong'] as const, su.wind, (v) => t(`wind.${v}` as I18nKey))}</select></label>
+        <label>${t('setup.windDir')}<select id="su-winddir" ${su.wind === 'none' ? 'disabled' : ''}>${opt(['head', 'cross', 'tail'] as const, su.windDir, (v) => t(`windDir.${v}` as I18nKey))}</select></label>
+      </div>`;
+    const settings = su.mode === 'group' ? `
+      <div class="mode-settings">
+        <label>${t('setup.riders', { n: su.riders })}<input type="range" id="su-riders" min="1" max="10" value="${su.riders}"></label>
+        <label>${t('setup.pace', { p: Math.round(su.pace * 100), w: Math.round(su.pace * this.profile.ftp) })}<input type="range" id="su-pace" min="50" max="90" step="5" value="${Math.round(su.pace * 100)}"></label>
+        <label class="check"><input type="checkbox" id="su-wait" ${su.wait ? 'checked' : ''}> ${t('setup.wait')}</label>
+        <label class="check"><input type="checkbox" id="su-relay" ${su.relay ? 'checked' : ''}> ${t('setup.relay')}</label>
+        ${wind}
+      </div>` : su.mode === 'race' ? `
+      <div class="mode-settings">
+        <div class="seg">${([0.8, 1, 1.15] as const).map((l) => `<button data-level="${l}" class="${su.level === l ? 'sel' : ''}">${t(`level.${l === 0.8 ? 'easy' : l === 1 ? 'mid' : 'hard'}` as I18nKey)}<small>${Math.round(l * 100)} % FTP</small></button>`).join('')}</div>
+        <label>${t('setup.rivals', { n: su.riders })}<input type="range" id="su-riders" min="1" max="10" value="${su.riders}"></label>
+        <label>${t('setup.raceKm')}<select id="su-km">${opt([5, 10, 20, 30, 40] as const, su.raceKm as 5, (v) => `${v} km`)}</select></label>
+        <p class="hint">${t('setup.raceHint')}</p>
+        ${wind}
+      </div>` : `<div class="mode-settings">${wind}</div>`;
     return `
+      <h2 class="panel-title">${t('ride.what')}</h2>
+      <div class="tiles">${modes.map((md) => `
+        <button class="tile ${su.mode === md.id ? 'sel' : ''}" data-mode="${md.id}" ${md.id === 'workout' ? 'disabled' : ''}>
+          <span class="ico">${md.icon}</span><b>${t(`mode.${md.id}` as I18nKey)}</b><small>${t(`mode.${md.id}.sub` as I18nKey)}</small>
+        </button>`).join('')}
+      </div>
+      ${settings}
+      <h3>${t('ride.where')}</h3>
       <svg class="france" viewBox="0 0 ${m.width} ${m.height}" role="img" aria-label="France">
         ${m.departements.map((d) => `<path d="${d.d}" class="${hot.has(d.code) ? 'hot' : ''}"><title>${escapeHtml(d.nom)}</title></path>`).join('')}
         ${ROUTES.map((r) => {
@@ -157,28 +230,23 @@ export class App {
           return `<g class="marker ${sel?.entry?.id === r.id ? 'sel' : ''}" data-route="${r.id}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})"><circle r="13"/><circle r="5" class="dot"/></g>`;
         }).join('')}
       </svg>
-      <h3>${t('free.title')}</h3>
-      <p class="hint">${t('free.hint')}</p>
-      ${[...worlds, 'paris' as const].map((w) => `<div class="starts"><b>${t(`world.${w}` as I18nKey)}</b>${START_POINTS.filter((s) => s.world === w).map((s) => `<button data-start="${s.id}" class="chip ${this.freeStart?.name === s.name ? 'sel' : ''}">${escapeHtml(s.name)}</button>`).join('')}</div>`).join('')}
-      <form class="search" id="free-search"><input type="search" id="free-q" placeholder="${t('free.search')}" autocomplete="off"><button type="submit">${t('free.go')}</button></form>
-      ${this.searchResults.length ? `<div class="starts">${this.searchResults.map((r, i) => `<button data-res="${i}" class="chip ${this.freeStart?.name === r.name ? 'sel' : ''}">${escapeHtml(r.name)}</button>`).join('')}</div>` : ''}
-      ${this.freeStart ? `<button class="primary big" id="free-start">${t('free.start', { name: this.freeStart.name })}</button>` : ''}
-      <h3>${t('ride.routes')}</h3>
-      ${worlds.map((w) => `
-        <h3>${t(`world.${w}` as I18nKey)}</h3>
-        <ul class="routes">${ROUTES.filter((r) => r.world === w).map((r) => `
-          <li><button data-route="${r.id}" class="${sel?.entry?.id === r.id ? 'sel' : ''}"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.description)}</small></button></li>`).join('')}
-        </ul>`).join('')}
-      <h3>${t('world.gpx')}</h3>
-      <label class="file-btn">${t('ride.import')}<input type="file" accept=".gpx,application/gpx+xml" id="gpx-input" hidden></label>
-      <p class="hint">${t('ride.importHint')}</p>
-      <div class="selection">
-        ${sel ? `
-          <h4>${escapeHtml(sel.name)}</h4>
-          <div class="stats"><span>${t('ride.distance')} <b>${fmtKm(sel.distance, 1)} km</b></span><span>${t('ride.ascent')} <b>${fmtNum(sel.ascent)} m</b></span></div>
-          ${sel.distance > 100000 ? `<p class="warn">${t('ride.tooLong', { km: fmtKm(sel.distance, 0) })}</p>` : ''}
-          <button class="primary big" id="start">${t('ride.start')}</button>` : `<p class="hint">${t('ride.choose')}</p>`}
-      </div>`;
+      <details class="pf-sec" ${this.freeStart || !sel ? 'open' : ''}><summary>${t('free.title')}</summary><div class="pf-body">
+        <p class="hint">${t('free.hint')}</p>
+        ${[...worlds, 'paris' as const].map((w) => `<div class="starts"><b>${t(`world.${w}` as I18nKey)}</b>${START_POINTS.filter((s) => s.world === w).map((s) => `<button data-start="${s.id}" class="chip ${this.freeStart?.name === s.name ? 'sel' : ''}">${escapeHtml(s.name)}</button>`).join('')}</div>`).join('')}
+        <form class="search" id="free-search"><input type="search" id="free-q" placeholder="${t('free.search')}" autocomplete="off"><button type="submit">${t('free.go')}</button></form>
+        ${this.searchResults.length ? `<div class="starts">${this.searchResults.map((r, i) => `<button data-res="${i}" class="chip ${this.freeStart?.name === r.name ? 'sel' : ''}">${escapeHtml(r.name)}</button>`).join('')}</div>` : ''}
+      </div></details>
+      <details class="pf-sec" ${sel ? 'open' : ''}><summary>${t('ride.routes')}</summary><div class="pf-body">
+        ${worlds.map((w) => `
+          <h4 class="sub">${t(`world.${w}` as I18nKey)}</h4>
+          <ul class="routes">${ROUTES.filter((r) => r.world === w).map((r) => `
+            <li><button data-route="${r.id}" class="${sel?.entry?.id === r.id ? 'sel' : ''}"><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.description)}</small></button></li>`).join('')}
+          </ul>`).join('')}
+        <h4 class="sub">${t('world.gpx')}</h4>
+        <label class="file-btn">${t('ride.import')}<input type="file" accept=".gpx,application/gpx+xml" id="gpx-input" hidden></label>
+        <p class="hint">${t('ride.importHint')}</p>
+        ${sel && sel.distance > 100000 ? `<p class="warn">${t('ride.tooLong', { km: fmtKm(sel.distance, 0) })}</p>` : ''}
+      </div></details>`;
   }
 
   private bindRideTab(): void {
@@ -186,12 +254,14 @@ export class App {
       el.addEventListener('click', () => {
         const s = START_POINTS.find((p) => p.id === el.dataset.start);
         if (s) this.freeStart = { name: s.name, lat: s.lat, lon: s.lon };
+        this.selection = null;
         this.renderHome();
       }),
     );
     this.ui.querySelectorAll<HTMLElement>('[data-res]').forEach((el) =>
       el.addEventListener('click', () => {
         this.freeStart = this.searchResults[Number(el.dataset.res)] ?? null;
+        this.selection = null;
         this.renderHome();
       }),
     );
@@ -203,9 +273,35 @@ export class App {
       this.message = this.searchResults.length ? '' : t('free.notFound');
       this.renderHome();
     });
-    $(this.ui, '#free-start')?.addEventListener('click', () => {
-      if (this.freeStart) this.startRide({ kind: 'open', ...this.freeStart });
-    });
+    // modes et réglages de la sortie (enregistrés avec le profil)
+    const saveSetup = (patch: Partial<RideSetup>, rerender = true) => {
+      Object.assign(this.setup, patch);
+      writeSave(this.save);
+      if (rerender) this.renderHome();
+    };
+    this.ui.querySelectorAll<HTMLElement>('[data-mode]').forEach((el) =>
+      el.addEventListener('click', () => saveSetup({ mode: el.dataset.mode as RideMode })),
+    );
+    this.ui.querySelectorAll<HTMLElement>('[data-level]').forEach((el) =>
+      el.addEventListener('click', () => saveSetup({ level: Number(el.dataset.level) as RideSetup['level'] })),
+    );
+    const range = (id: string, apply: (v: number) => Partial<RideSetup>) => {
+      const el = $<HTMLInputElement>(this.ui, `#${id}`);
+      el?.addEventListener('input', () => {
+        saveSetup(apply(Number(el.value)), false);
+        const lbl = el.parentElement!.firstChild!;
+        lbl.textContent = id === 'su-pace'
+          ? t('setup.pace', { p: el.value, w: Math.round((Number(el.value) / 100) * this.profile.ftp) })
+          : t(this.setup.mode === 'race' ? 'setup.rivals' : 'setup.riders', { n: el.value });
+      });
+    };
+    range('su-riders', (v) => ({ riders: v }));
+    range('su-pace', (v) => ({ pace: v / 100 }));
+    $<HTMLInputElement>(this.ui, '#su-wait')?.addEventListener('change', (e) => saveSetup({ wait: (e.target as HTMLInputElement).checked }, false));
+    $<HTMLInputElement>(this.ui, '#su-relay')?.addEventListener('change', (e) => saveSetup({ relay: (e.target as HTMLInputElement).checked }, false));
+    $<HTMLSelectElement>(this.ui, '#su-km')?.addEventListener('change', (e) => saveSetup({ raceKm: Number((e.target as HTMLSelectElement).value) }, false));
+    $<HTMLSelectElement>(this.ui, '#su-wind')?.addEventListener('change', (e) => saveSetup({ wind: (e.target as HTMLSelectElement).value as RideSetup['wind'] }));
+    $<HTMLSelectElement>(this.ui, '#su-winddir')?.addEventListener('change', (e) => saveSetup({ windDir: (e.target as HTMLSelectElement).value as RideSetup['windDir'] }, false));
     this.ui.querySelectorAll<HTMLElement>('[data-route]').forEach((el) =>
       el.addEventListener('click', () => this.selectDemo(el.dataset.route!)),
     );
@@ -214,12 +310,6 @@ export class App {
       if (!file) return;
       const text = await file.text();
       this.selectGpx(text, file.name.replace(/\.gpx$/i, ''));
-    });
-    $(this.ui, '#start')?.addEventListener('click', () => {
-      const sel = this.selection;
-      if (!sel) return;
-      const gpx = parseGpx(sel.gpx, sel.name);
-      this.startRide({ kind: 'gpx', route: Route.fromPoints(sel.name, gpx.points) });
     });
   }
 
@@ -272,12 +362,33 @@ export class App {
           <div><b>${t(`dev.${k}` as I18nKey)}</b><small>${s ? `${escapeHtml(s.name)} — ${status}${extra}` : ''}</small></div>
           ${s ? `<button data-disc="${k}">${t('dev.disconnect')}</button>` : `<button class="primary" data-conn="${k}" ${supported ? '' : 'disabled'}>${t('dev.connect')}</button>`}
         </li>`;
-      }).join('')}</ul>
+      }).join('')}
+      <li class="click-row">
+        <div><b>${t('dev.click')}</b><small>${this.click.name ? `${escapeHtml(this.click.name)} — ` : ''}${t(`click.${this.click.status}` as I18nKey)}</small></div>
+        ${this.click.status === 'connected'
+          ? `<button id="click-disc">${t('dev.disconnect')}</button>`
+          : `<button class="primary" id="click-conn" ${supported ? '' : 'disabled'}>${t('dev.connect')}</button>`}
+      </li></ul>
+      <p class="hint">${t('dev.clickHint')}</p>
       <p class="hint">${t('dev.watchHint')}</p>
       <label class="check"><input type="checkbox" id="demo" ${this.devices.demoForced ? 'checked' : ''}> ${t('dev.demo')}</label>`;
   }
 
   private bindDevicesTab(): void {
+    $(this.ui, '#click-conn')?.addEventListener('click', async () => {
+      try {
+        await this.click.connect();
+        this.message = '';
+      } catch (e) {
+        const err = e as Error;
+        if (err.name !== 'NotFoundError') this.message = t('dev.error', { msg: err.message || err.name });
+      }
+      this.renderHome();
+    });
+    $(this.ui, '#click-disc')?.addEventListener('click', () => {
+      this.click.disconnect();
+      this.renderHome();
+    });
     this.ui.querySelectorAll<HTMLButtonElement>('[data-conn]').forEach((b) =>
       b.addEventListener('click', async () => {
         try {
@@ -375,13 +486,17 @@ export class App {
         ${color('pf-fc2', 'pf.frameColor2', a.frameColor2)}
         ${sel('pf-finish', 'pf.finish', ['gloss', 'matte'] as const, a.finish, tr('finish'))}
       </div>
+      <div class="grid2">
+        ${check('pf-forkon', 'pf.forkColor', !!a.forkColor)}
+        ${color('pf-fork', 'pf.forkColorPick', a.forkColor || a.frameColor2)}
+      </div>
       <div class="grid3">
         ${sel('pf-group', 'pf.groupset', ['black', 'silver'] as const, a.groupset, tr('group'))}
         ${color('pf-tape', 'pf.barTape', a.barTape)}
         ${color('pf-saddle', 'pf.saddle', a.saddleColor)}
       </div>
       <div class="grid3">
-        ${sel('pf-tirewall', 'pf.tireWall', ['black', 'tan'] as const, a.tireWall, tr('tire'))}
+        ${sel('pf-tirewall', 'pf.tireWall', ['black', 'tan', 'blue', 'red', 'white', 'yellow', 'green'] as const, a.tireWall, tr('tire'))}
         ${sel('pf-bottles', 'pf.bottles', [0, 1, 2] as const, a.bottles, (v) => String(v))}
         ${color('pf-bottlec', 'pf.bottleColor', a.bottleColor)}
       </div>
@@ -416,6 +531,10 @@ export class App {
 
     const display = `
       <div class="grid2">
+        ${sel('pf-room', 'pf.room', ['neon', 'workshop', 'living', 'loft'] as const, a.room, tr('room'))}
+        ${sel('pf-style', 'pf.style', ['smooth', 'facet'] as const, a.style, tr('style'))}
+      </div>
+      <div class="grid2">
         ${sel('pf-quality', 'pf.quality', ['low', 'medium', 'high'] as const, p.quality, tr('q'))}
         ${sel('pf-lang', 'pf.lang', ['fr', 'en'] as const, p.lang, (v) => (v === 'fr' ? 'Français' : 'English'))}
       </div>`;
@@ -426,6 +545,7 @@ export class App {
         ${section('kit', 'pf.sec.kit', kit)}
         ${section('bike', 'pf.sec.bike', bike)}
         <p class="hint" id="pf-physics">${t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) })}</p>
+        <div class="effect" id="pf-effect">${roadEffectHtml(p)}</div>
         ${section('drive', 'pf.sec.drive', drive)}
         ${section('display', 'pf.sec.display', display)}
         <p class="hint preview-note" id="pf-dirty" hidden>${t('pf.preview')}</p>
@@ -474,6 +594,9 @@ export class App {
       bottleColor: val('pf-bottlec'),
       computer: chk('pf-computer'),
       towel: chk('pf-towel'),
+      forkColor: chk('pf-forkon') ? val('pf-fork') : '',
+      room: val('pf-room') as Appearance['room'],
+      style: val('pf-style') as Appearance['style'],
     };
     return {
       ...p,
@@ -534,6 +657,7 @@ export class App {
         this.home.setLook(lookFromProfile(draft));
         const params = buildParams({ weightKg: draft.weightKg, heightCm: draft.heightCm, frame: draft.frame, wheels: draft.wheels, kit: draft.kit });
         $(this.ui, '#pf-physics').textContent = t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) });
+        $(this.ui, '#pf-effect').innerHTML = roadEffectHtml(draft);
         $(this.ui, '#pf-dirty').hidden = false;
       });
     };
@@ -621,8 +745,10 @@ export class App {
     const overlay = $(this.ui, '#ride-overlay');
     const ride = new RideView(source, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
       onPauseMenu: () => this.showPause(),
-      onFinish: (summary, samples) => this.showReport(summary, samples),
-    });
+      onFinish: (summary, samples, ranking) => this.showReport(summary, samples, ranking),
+    }, this.setup);
+    ride.scene.environment = this.engine.environment();
+    ride.scene.environmentIntensity = 0.45;
     this.ride = ride;
     this.engine.setView(ride);
     try {
@@ -719,7 +845,7 @@ export class App {
     });
   }
 
-  private showReport(s: RideSummary, samples: Sample[]): void {
+  private showReport(s: RideSummary, samples: Sample[], ranking: RankEntry[] = []): void {
     const before = levelFromXp(this.save.xp).level;
     if (samples.length > 10) {
       this.save.history.unshift(s);
@@ -750,6 +876,9 @@ export class App {
         <h4>${escapeHtml(s.routeName)}</h4>
         ${after > before ? `<p class="levelup">${t('rep.levelUp', { n: after })}</p>` : ''}
         <dl>${rows.map(([k, v]) => `<div><dt>${t(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>
+        ${ranking.length && this.setup.mode === 'race' ? `
+          <h4>${t('rep.podium')}</h4>
+          <ol class="podium">${ranking.map((r, i) => `<li class="${r.isPlayer ? 'me' : ''}"><b>${i + 1}. ${escapeHtml(r.name)}</b><span>${escapeHtml(r.team)}${r.finishTime !== null ? ` · ${fmtTime(r.finishTime)}` : ''}</span></li>`).join('')}</ol>` : ''}
         <div class="row">
           <button class="primary" data-act="fit">${t('rep.fit')}</button>
           <button data-act="gpx">${t('rep.gpx')}</button>
@@ -779,6 +908,35 @@ export class App {
     if (!this.save.history.length) this.tab = 'ride';
     this.renderHome();
   }
+}
+
+/**
+ * « Effet sur la route » : vitesse gagnée ou perdue à 250 W pour chaque choix de matériel,
+ * sur le plat et dans une côte à 8 %, par rapport à un vélo route en alu sans accessoire aéro.
+ */
+function roadEffectHtml(p: Profile): string {
+  const base: RiderSetup = { weightKg: p.weightKg, heightCm: p.heightCm, frame: 'climb', wheels: 'alu', kit: { aeroHelmet: false, highSocks: false, overshoes: false } };
+  const speed = (su: RiderSetup, grade: number) =>
+    steadySpeed(250, { grade, headwind: 0, rho: airDensity(0), crr: crrFor(su.frame, 'asphalt'), draft: 1 }, buildParams(su)) * 3.6;
+  const rows: Array<[I18nKey, RiderSetup]> = [
+    ['effect.frame', { ...base, frame: p.frame }],
+    ['effect.wheels', { ...base, wheels: p.wheels }],
+    ['effect.helmet', { ...base, kit: { ...base.kit, aeroHelmet: p.kit.aeroHelmet } }],
+    ['effect.socks', { ...base, kit: { ...base.kit, highSocks: p.kit.highSocks } }],
+    ['effect.overshoes', { ...base, kit: { ...base.kit, overshoes: p.kit.overshoes } }],
+    ['effect.total', { ...base, frame: p.frame, wheels: p.wheels, kit: p.kit }],
+  ];
+  const f0 = speed(base, 0), c0 = speed(base, 0.08);
+  const cell = (d: number) => {
+    const v = Math.abs(d) < 0.005 ? '0,00' : `${d > 0 ? '+' : '−'}${fmtNum(Math.abs(d), 2)}`;
+    return `<td class="${d > 0.005 ? 'pos' : d < -0.005 ? 'neg' : ''}">${v}</td>`;
+  };
+  return `
+    <h4>${t('effect.title')}</h4>
+    <table><thead><tr><th></th><th>${t('effect.flat')}</th><th>${t('effect.climb')}</th></tr></thead><tbody>
+      ${rows.map(([k, su]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${cell(speed(su, 0) - f0)}${cell(speed(su, 0.08) - c0)}</tr>`).join('')}
+    </tbody></table>
+    <small>${t('effect.hint')} (km/h)</small>`;
 }
 
 /** Recherche d'une adresse ou d'un lieu en France (service de géocodage de l'IGN). */
