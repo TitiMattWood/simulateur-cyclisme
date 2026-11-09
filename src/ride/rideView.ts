@@ -12,6 +12,9 @@ import type { View } from '../render/engine';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RiderModel } from '../render/riderModel';
 import { aiLook } from './ai/looks';
+import { Peloton, type RankEntry, type PelotonEnv } from './ai/peloton';
+import { defaultSetup, WIND_SPEED, type RideSetup } from './setup';
+import { RaceHud } from '../ui/raceHud';
 import { lookFromProfile } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
@@ -41,7 +44,8 @@ export type RideSource =
 
 export interface RideCallbacks {
   onPauseMenu(): void;
-  onFinish(summary: RideSummary, samples: Sample[]): void;
+  /** ranking : classement final (course ou groupe), vide en sortie libre */
+  onFinish(summary: RideSummary, samples: Sample[], ranking: RankEntry[]): void;
 }
 
 /** Tracé provisoire du trajet libre : le point de départ, le temps de charger les routes. */
@@ -95,6 +99,21 @@ export class RideView implements View {
   private sample = emptySample();
   private sample2 = emptySample();
   private preview: Array<{ model: RiderModel; offset: number; lateral: number }> = [];
+  /** coureurs IA (groupe ou course) et leurs avatars */
+  private peloton: Peloton | null = null;
+  private aiModels: RiderModel[] = [];
+  private aiLod: number[] = [];
+  private raceHud: RaceHud | null = null;
+  private pelEnv: PelotonEnv | null = null;
+  /** vent dans le repère du monde (m/s, direction vers laquelle il souffle) */
+  private wind = { x: 0, z: 0 };
+  /** abri du joueur (1 = aucun) */
+  private playerDraft = 1;
+  /** décalage latéral du joueur (placement automatique dans l'abri en groupe/course) */
+  private playerLateral = 0;
+  private finishTime: number | null = null;
+  /** distance d'arrivée d'une course en trajet libre */
+  private raceFinish: number | null = null;
   private power3: number[] = [];
   private live = { power: 0, cadence: 0, hr: 0, source: 'demo' as 'ble' | 'demo' };
   private trainerTimer = 0;
@@ -111,6 +130,7 @@ export class RideView implements View {
     private readonly q: QualityPreset,
     private readonly overlay: HTMLElement,
     private readonly cb: RideCallbacks,
+    private readonly setup: RideSetup = defaultSetup(),
   ) {
     const s = this.scene;
     // Ciel physique (diffusion de Rayleigh/Mie) : bleu profond en haut, horizon laiteux, soleil.
@@ -225,9 +245,60 @@ export class RideView implements View {
     this.placeRider(0);
     this.routeMesh?.update(0);
     this.hud = new Hud(this.overlay, this.track, this.path ? { net: this.net, path: this.path } : null);
+    this.setupWindAndAi();
     window.addEventListener('keydown', this.keyDown);
     window.addEventListener('keyup', this.keyUp);
     this.state = 'riding';
+  }
+
+  /**
+   * Vent (fixé par rapport à la route au départ) et coureurs IA (groupe ou course).
+   */
+  private setupWindAndAi(): void {
+    const su = this.setup;
+    const s0 = this.track.sampleAt(this.dist);
+    const w = WIND_SPEED[su.wind];
+    // droite de la marche = (−dirZ, dirX) ; « de côté » = vent venant de la gauche
+    if (su.windDir === 'head') this.wind = { x: -s0.dirX * w, z: -s0.dirZ * w };
+    else if (su.windDir === 'tail') this.wind = { x: s0.dirX * w, z: s0.dirZ * w };
+    else this.wind = { x: -s0.dirZ * w, z: s0.dirX * w };
+    if (su.mode === 'free') return;
+    if (su.mode === 'race') this.raceFinish = this.track.open ? this.dist + su.raceKm * 1000 : this.track.length;
+    const p = this.profile;
+    this.peloton = new Peloton(su, p.ftp, p.appearance.style, this.dist, Math.floor(Math.random() * 1e6));
+    for (const r of this.peloton.riders) {
+      const m = new RiderModel(r.look);
+      m.setBlobShadow(!this.q.rideShadows);
+      m.crankAngle = r.id * 1.3;
+      this.scene.add(m.root);
+      this.aiModels.push(m);
+      this.aiLod.push(0);
+    }
+    this.pelEnv = {
+      road: (d) => {
+        const s = this.track.sampleAt(d, this.sample2);
+        return { grade: s.grade, ele: s.ele, surface: s.surface, vmax: s.vmax, dirX: s.dirX, dirZ: s.dirZ };
+      },
+      rho: (ele) => airDensity(ele, 15),
+      crr: (frame, surface) => crrFor(frame, surface),
+      wind: this.wind,
+      finish: this.raceFinish,
+    };
+    this.raceHud = new RaceHud(this.overlay);
+  }
+
+  /** Vent de face (m/s) et vent de côté (venant de la gauche, m/s) pour une direction de route. */
+  private windAt(dirX: number, dirZ: number): { head: number; cross: number } {
+    return {
+      head: -(this.wind.x * dirX + this.wind.z * dirZ),
+      cross: -this.wind.x * dirZ + this.wind.z * dirX,
+    };
+  }
+
+  /** Classement en direct (vide en sortie libre). */
+  private ranking(): RankEntry[] {
+    if (!this.peloton) return [];
+    return this.peloton.ranking({ dist: this.dist, v: this.dyn.v, lateral: this.playerLateral, name: this.profile.name || t('rep.you'), finishTime: this.finishTime });
   }
 
   /** Parcours GPX : reconnaît le revêtement (bitume, gravier, terre) d'après les routes BD TOPO voisines. */
@@ -266,7 +337,7 @@ export class RideView implements View {
     if (this.state === 'finished') return;
     this.state = 'finished';
     const summary = this.recorder.summarize(this.track.name, this.profile.ftp);
-    this.cb.onFinish(summary, this.recorder.samples);
+    this.cb.onFinish(summary, this.recorder.samples, this.ranking());
   }
 
   /** Trajet libre : direction au prochain carrefour (−1 gauche, +1 droite). */
@@ -279,6 +350,7 @@ export class RideView implements View {
     if (!this.path) return;
     this.path.uTurn(this.dist);
     this.dyn.v = Math.min(this.dyn.v, 2);
+    this.peloton?.onPlayerUTurn(this.dist);
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {
@@ -331,7 +403,7 @@ export class RideView implements View {
   }
 
   private placeRider(d: number): void {
-    this.placeModel(this.rider, d, 0);
+    this.placeModel(this.rider, d, this.playerLateral);
   }
 
   /**
@@ -382,12 +454,13 @@ export class RideView implements View {
     const moving = this.state === 'riding';
     const s = this.track.sampleAt(this.dist, this.sample);
     if (moving) {
+      const wd = this.windAt(s.dirX, s.dirZ);
       const conds = {
         grade: s.grade,
-        headwind: 0,
+        headwind: wd.head,
         rho: airDensity(s.ele, 15),
         crr: crrFor(p.frame, s.surface),
-        draft: 1,
+        draft: this.playerDraft,
       };
       const v = this.dyn.step(dt, this.live.power, conds, s.vmax);
       this.dist = Math.min(this.track.length, this.dist + v * dt);
@@ -401,7 +474,22 @@ export class RideView implements View {
       }
       if (this.lastEle !== null && s.ele > this.lastEle && s.ele - this.lastEle < 5) this.ascent += s.ele - this.lastEle;
       this.lastEle = s.ele;
-      this.driveTrainer(dt, conds.rho, conds.crr, v);
+      this.driveTrainer(dt, conds.rho, conds.crr, v, wd.head, conds.draft);
+      // coureurs IA
+      if (this.peloton && this.pelEnv) {
+        const me = { dist: this.dist, v, lateral: this.playerLateral };
+        this.playerLateral += (this.peloton.bestLateralFor(me) - this.playerLateral) * Math.min(1, dt * 0.8);
+        this.peloton.step(dt, me, this.pelEnv);
+        this.playerDraft = this.peloton.playerDraft;
+        for (const e of this.peloton.takeEvents()) this.raceHud?.announce(e);
+      } else {
+        this.playerDraft = 1;
+      }
+      if (this.raceFinish !== null && this.finishTime === null && this.dist >= this.raceFinish) {
+        this.finishTime = this.elapsed;
+        this.raceHud?.announce({ key: 'ev.finish' });
+        if (this.track.open) window.setTimeout(() => this.finish(), 2500);
+      }
       if (!this.track.open && this.dist >= this.track.length - 0.5) this.finish();
     }
     this.power3.push(this.live.power);
@@ -413,6 +501,25 @@ export class RideView implements View {
     for (const p of this.preview) {
       this.placeModel(p.model, this.dist + p.offset, p.lateral);
       p.model.update(dt, 86, this.dyn.v);
+    }
+    if (this.peloton) {
+      const cam = this.camera.position;
+      this.peloton.riders.forEach((r, i) => {
+        const m = this.aiModels[i];
+        // trop loin derrière (hors de l'historique du trajet libre) : on masque
+        m.root.visible = r.dist > this.dist - 700;
+        if (!m.root.visible) return;
+        this.placeModel(m, r.dist, r.lateral);
+        // cadence : plus élevée quand la puissance monte, roue libre à faible puissance
+        const cad = r.power < 25 ? 0 : 78 + Math.min(25, (r.power / r.ftp) * 14);
+        // au-delà de 45 m, les jambes ne sont recalculées qu'une image sur trois
+        this.aiLod[i] += dt;
+        const far = m.root.position.distanceTo(cam) > 45;
+        if (!far || this.aiLod[i] > 0.1) {
+          m.update(this.aiLod[i], moving ? cad : 0, r.dyn.v);
+          this.aiLod[i] = 0;
+        }
+      });
     }
     this.world.update(this.rider.root.position.x, this.rider.root.position.z, this.dist);
     this.routeMesh?.update(this.dist);
@@ -445,6 +552,21 @@ export class RideView implements View {
         x: s.x,
         z: s.z,
       });
+      if (this.raceHud && this.peloton) {
+        const rho = airDensity(s.ele, 15);
+        const wd = this.windAt(s.dirX, s.dirZ);
+        const vAir = Math.max(0, this.dyn.v + wd.head);
+        const saved = (0.5 * rho * this.params.cda * vAir * vAir * this.dyn.v * (1 - this.playerDraft)) / this.params.drivetrain;
+        this.raceHud.update({
+          mode: this.setup.mode === 'race' ? 'race' : 'group',
+          draft: this.playerDraft,
+          saved,
+          ranking: this.ranking(),
+          speed: this.dyn.v,
+          remaining: this.raceFinish !== null ? this.raceFinish - this.dist : null,
+          crosswind: Math.abs(this.peloton.yaw) > 0.12,
+        });
+      }
     }
   }
 
@@ -454,7 +576,7 @@ export class RideView implements View {
    * la résistance de l'air. En vitesses virtuelles, ces valeurs sont converties pour que
    * l'effort ressenti corresponde au braquet virtuel engagé (voir physics/trainerSim.ts).
    */
-  private driveTrainer(dt: number, rho: number, crr: number, v: number): void {
+  private driveTrainer(dt: number, rho: number, crr: number, v: number, headwind = 0, draft = 1): void {
     this.trainerTimer += dt;
     const tr = this.devices.trainer;
     if (!tr || this.trainerTimer < 1) return;
@@ -463,7 +585,8 @@ export class RideView implements View {
     const ahead = this.track.sampleAt(this.dist + Math.max(5, v * 1.5));
     const k = p.shifting === 'virtual' ? virtualFactor(this.gears, p.chainring, p.cogTeeth) : 1;
     const sim = simulationParams({
-      grade: ahead.grade, crr, cw: 0.5 * rho * this.params.cda, headwind: 0,
+      // l'abri allège la résistance de l'air envoyée au trainer : on sent l'aspiration
+      grade: ahead.grade, crr, cw: 0.5 * rho * this.params.cda * draft, headwind,
       difficulty: p.trainerDifficulty, k,
     });
     tr.setSimulation(sim.grade, sim.crr, sim.cw, sim.wind).catch(() => undefined);
@@ -487,5 +610,7 @@ export class RideView implements View {
     this.routeMesh?.dispose();
     this.landmarks.dispose();
     this.rider.dispose();
+    this.raceHud?.dispose();
+    for (const m of [...this.aiModels, ...this.preview.map((p) => p.model)]) m.dispose();
   }
 }

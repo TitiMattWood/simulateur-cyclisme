@@ -8,6 +8,7 @@ import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearan
 import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
+import { ZwiftClick } from '../devices/zwiftClick';
 import { loadSave, writeSave, exportBackup, importBackup, type SaveData, type Profile } from '../storage/store';
 import { parseGpx } from '../geo/gpx';
 import { Route } from '../geo/route';
@@ -28,6 +29,7 @@ import { escapeHtml, fmtKm, fmtNum, fmtTime } from './format';
 import type { FrameId, WheelId } from '../physics/equipment';
 import { CHAINRINGS, CASSETTES, TIRES, type TireId } from '../physics/gears';
 import type { RideMode, RideSetup } from '../ride/setup';
+import type { RankEntry } from '../ride/ai/peloton';
 
 type Tab = 'ride' | 'devices' | 'profile' | 'history';
 
@@ -53,6 +55,8 @@ export class App {
   private engine: Engine;
   private home: HomeScene;
   private devices = new DeviceManager();
+  /** manette Zwift Click en Bluetooth direct (expérimental) */
+  private click = new ZwiftClick();
   private ui: HTMLElement;
   private tab: Tab = 'ride';
   private selection: Selection | null = null;
@@ -74,6 +78,9 @@ export class App {
     this.engine.setView(this.home);
     this.engine.start();
     this.devices.onChange = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };
+    this.click.onStatus = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };
+    // boutons + / − de la manette : vitesse virtuelle plus dure / plus souple
+    this.click.onShift = (dir) => this.ride?.shift(dir);
     if (!this.save.profile.configured) {
       this.tab = 'profile';
       this.message = t('pf.welcome');
@@ -355,12 +362,33 @@ export class App {
           <div><b>${t(`dev.${k}` as I18nKey)}</b><small>${s ? `${escapeHtml(s.name)} — ${status}${extra}` : ''}</small></div>
           ${s ? `<button data-disc="${k}">${t('dev.disconnect')}</button>` : `<button class="primary" data-conn="${k}" ${supported ? '' : 'disabled'}>${t('dev.connect')}</button>`}
         </li>`;
-      }).join('')}</ul>
+      }).join('')}
+      <li class="click-row">
+        <div><b>${t('dev.click')}</b><small>${this.click.name ? `${escapeHtml(this.click.name)} — ` : ''}${t(`click.${this.click.status}` as I18nKey)}</small></div>
+        ${this.click.status === 'connected'
+          ? `<button id="click-disc">${t('dev.disconnect')}</button>`
+          : `<button class="primary" id="click-conn" ${supported ? '' : 'disabled'}>${t('dev.connect')}</button>`}
+      </li></ul>
+      <p class="hint">${t('dev.clickHint')}</p>
       <p class="hint">${t('dev.watchHint')}</p>
       <label class="check"><input type="checkbox" id="demo" ${this.devices.demoForced ? 'checked' : ''}> ${t('dev.demo')}</label>`;
   }
 
   private bindDevicesTab(): void {
+    $(this.ui, '#click-conn')?.addEventListener('click', async () => {
+      try {
+        await this.click.connect();
+        this.message = '';
+      } catch (e) {
+        const err = e as Error;
+        if (err.name !== 'NotFoundError') this.message = t('dev.error', { msg: err.message || err.name });
+      }
+      this.renderHome();
+    });
+    $(this.ui, '#click-disc')?.addEventListener('click', () => {
+      this.click.disconnect();
+      this.renderHome();
+    });
     this.ui.querySelectorAll<HTMLButtonElement>('[data-conn]').forEach((b) =>
       b.addEventListener('click', async () => {
         try {
@@ -717,8 +745,8 @@ export class App {
     const overlay = $(this.ui, '#ride-overlay');
     const ride = new RideView(source, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
       onPauseMenu: () => this.showPause(),
-      onFinish: (summary, samples) => this.showReport(summary, samples),
-    });
+      onFinish: (summary, samples, ranking) => this.showReport(summary, samples, ranking),
+    }, this.setup);
     ride.scene.environment = this.engine.environment();
     ride.scene.environmentIntensity = 0.45;
     this.ride = ride;
@@ -817,7 +845,7 @@ export class App {
     });
   }
 
-  private showReport(s: RideSummary, samples: Sample[]): void {
+  private showReport(s: RideSummary, samples: Sample[], ranking: RankEntry[] = []): void {
     const before = levelFromXp(this.save.xp).level;
     if (samples.length > 10) {
       this.save.history.unshift(s);
@@ -848,6 +876,9 @@ export class App {
         <h4>${escapeHtml(s.routeName)}</h4>
         ${after > before ? `<p class="levelup">${t('rep.levelUp', { n: after })}</p>` : ''}
         <dl>${rows.map(([k, v]) => `<div><dt>${t(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>
+        ${ranking.length && this.setup.mode === 'race' ? `
+          <h4>${t('rep.podium')}</h4>
+          <ol class="podium">${ranking.map((r, i) => `<li class="${r.isPlayer ? 'me' : ''}"><b>${i + 1}. ${escapeHtml(r.name)}</b><span>${escapeHtml(r.team)}${r.finishTime !== null ? ` · ${fmtTime(r.finishTime)}` : ''}</span></li>`).join('')}</ol>` : ''}
         <div class="row">
           <button class="primary" data-act="fit">${t('rep.fit')}</button>
           <button data-act="gpx">${t('rep.gpx')}</button>

@@ -1408,7 +1408,7 @@ export class RiderModel {
       faceParts.push(e, iris, brow);
     }
     faceParts.push(blob(mLips, headPt(0.635 * Math.PI, 0, 0.985), 0.006 * hs, 0.0045 * hs, 0.022 * hs));
-    this.body.add(...faceParts);
+    if (faceParts.length) this.body.add(...faceParts);
     this.headParts.push(...faceParts);
 
     // cheveux et barbe
@@ -1441,7 +1441,7 @@ export class RiderModel {
         hairParts.push(new THREE.Mesh(taperTube(new THREE.CatmullRomCurve3(pts), 0.009 * hs, 0.006 * hs, 16, 8), mHair));
       }
     }
-    this.body.add(...hairParts);
+    if (hairParts.length) this.body.add(...hairParts);
     this.headParts.push(...hairParts);
 
     // casque (lignes inspirées des casques Specialized : Prevail, Evade, TT5)
@@ -1520,7 +1520,7 @@ export class RiderModel {
         helmetParts.push(arm);
       }
     }
-    this.body.add(...helmetParts);
+    if (helmetParts.length) this.body.add(...helmetParts);
     this.headParts.push(...helmetParts);
 
     // bras : surface continue épaule → coude → main, manche par-dessus

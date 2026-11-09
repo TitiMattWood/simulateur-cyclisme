@@ -31,4 +31,4 @@ export function defaultSetup(): RideSetup {
 }
 
 /** Vitesse du vent (m/s) selon la force choisie. */
-export const WIND_SPEED: Record<WindStrength, number> = { none: 0, light: 3.5, strong: 8 };
+export const WIND_SPEED: Record<WindStrength, number> = { none: 0, light: 3, strong: 6 };
