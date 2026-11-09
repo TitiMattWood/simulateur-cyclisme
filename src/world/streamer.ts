@@ -11,12 +11,14 @@
  * sont transmises au réseau routier (onRoads) pour que le chemin puisse se prolonger.
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { roadAtlas, facadeMaterial } from './textures';
 import type { QualityPreset } from '../config';
 import type { RouteIndex } from '../geo/route';
 import type { Track } from '../geo/track';
 import { fetchDemGrid, fetchOrtho, fetchWfs, type BBox, type GeoFeature } from '../geo/ign';
 import { buildTerrain, flattenUnderRoute, flattenUnderRoads, ROAD_HALF_WIDTH } from './terrain';
-import { buildBuildings, buildVegetation, buildRoads } from './features';
+import { buildBuildings, buildVegetation, buildStreets } from './features';
 import { geoToPolys, geoToLines, sampleGrid, SegmentIndex, type HeightGrid } from './geometry';
 import { ROAD_CLASSES, ROAD_PROPS, roadWidth } from './roads';
 
@@ -59,6 +61,28 @@ const ROAD_MARGIN = 40;
 
 const terrainMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
 const featureMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
+/** chaussées : texture d'enrobé et de marquage, teintée par la couleur de chaque route */
+let streetMat: THREE.MeshStandardMaterial | null = null;
+const streetMaterial = () => (streetMat ??= new THREE.MeshStandardMaterial({ map: roadAtlas(), vertexColors: true, roughness: 0.92, metalness: 0 }));
+
+/** Lampadaire de ville (mât, crosse, lanterne), partagé par toutes les tuiles. */
+let lampGeo: THREE.BufferGeometry | null = null;
+const lampMat = new THREE.MeshStandardMaterial({ color: '#3a3f45', roughness: 0.5, metalness: 0.6 });
+function streetLamps(list: Array<[number, number, number, number]>): THREE.InstancedMesh {
+  if (!lampGeo) {
+    const parts = [
+      new THREE.CylinderGeometry(0.06, 0.09, 6, 8).translate(0, 3, 0),
+      new THREE.BoxGeometry(1.3, 0.07, 0.07).translate(0.62, 5.95, 0),
+      new THREE.BoxGeometry(0.55, 0.12, 0.26).translate(1.2, 5.88, 0),
+    ];
+    lampGeo = mergeGeometries(parts.map((g) => g.toNonIndexed()))!;
+  }
+  const inst = new THREE.InstancedMesh(lampGeo, lampMat, list.length);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1), axis = new THREE.Vector3(0, 1, 0);
+  list.forEach(([x, y, z, a], i) => inst.setMatrixAt(i, m.compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(axis, a), one)));
+  inst.castShadow = true;
+  return inst;
+}
 
 export class WorldStreamer {
   readonly group = new THREE.Group();
@@ -172,7 +196,10 @@ export class WorldStreamer {
         fetchOrtho(b, opx, opx),
         tile.level === 'near'
           ? Promise.all([
-              safe(fetchWfs('batiment', b, ['hauteur', 'nombre_d_etages', 'usage_1', 'nature'])),
+              safe(fetchWfs('batiment', b, [
+                'hauteur', 'nombre_d_etages', 'usage_1', 'nature', 'nombre_de_logements',
+                'materiaux_des_murs', 'materiaux_de_la_toiture', 'date_d_apparition', 'construction_legere',
+              ])),
               safe(fetchWfs('zone_de_vegetation', b, ['nature'])),
               safe(fetchWfs('surface_hydrographique', b, ['nature'])),
               safe(fetchWfs('troncon_de_route', this.bbox('near', tile.i, tile.j, ROAD_MARGIN), ROAD_PROPS)),
@@ -238,18 +265,32 @@ export class WorldStreamer {
       const ex = this.opts.exclusions ?? [];
       const bat = ex.length ? feats.bat.filter((f) => !this.excluded(f, ex)) : feats.bat;
       const bld = buildBuildings(bat, proj, grid, bounds);
-      if (bld) {
-        const mesh = new THREE.Mesh(bld, featureMaterial);
+      if (bld.walls) {
+        const mesh = new THREE.Mesh(bld.walls, facadeMaterial());
         mesh.userData.kind = 'buildings';
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+      if (bld.roofs) {
+        const mesh = new THREE.Mesh(bld.roofs, featureMaterial);
+        mesh.userData.kind = 'buildings';
+        mesh.castShadow = true;
         group.add(mesh);
       }
       const onRoute = this.index ? (x: number, z: number) => !!this.index!.nearest(x, z, ROAD_HALF_WIDTH + 1.5) : null;
-      const rd = buildRoads(feats.roads, feats.rails, proj, grid, bounds, onRoute);
-      if (rd) {
-        const rm = new THREE.Mesh(rd, featureMaterial);
-        rm.receiveShadow = true;
-        group.add(rm);
+      const rd = buildStreets(feats.roads, feats.rails, proj, grid, bounds, onRoute);
+      if (rd.surface) {
+        const sm = new THREE.Mesh(rd.surface, streetMaterial());
+        sm.receiveShadow = true;
+        group.add(sm);
       }
+      if (rd.extras) {
+        const em = new THREE.Mesh(rd.extras, featureMaterial);
+        em.receiveShadow = true;
+        group.add(em);
+      }
+      if (rd.lamps.length) group.add(streetLamps(rd.lamps));
       const ri = roads;
       const avoid = (x: number, z: number) => {
         const hit = ri?.nearest(x, z, 10, (d) => d.halfW);
