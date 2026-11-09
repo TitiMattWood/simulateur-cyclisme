@@ -28,6 +28,9 @@ export interface Appearance {
   style: AvatarStyle;
   /** décor de la page d'accueil */
   room: RoomId;
+  /** néons / rubans LED de la pièce : couleur et interrupteur */
+  neonColor: string;
+  neonOn: boolean;
   // ----- Cycliste
   skin: string;
   hair: HairStyle;
@@ -85,6 +88,8 @@ export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
   return {
     style: 'facet',
     room: 'neon',
+    neonColor: '#ff3d9a',
+    neonOn: true,
     skin: SKIN_TONES[1],
     hair: 'short',
     hairColor: HAIR_COLORS[1],

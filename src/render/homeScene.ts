@@ -12,7 +12,7 @@ import type { View } from './engine';
 import type { BloomStyle } from './post';
 import { RiderModel, type RiderLook } from './riderModel';
 import type { RoomId } from './look';
-import type { RoomSetup } from './rooms/common';
+import type { RoomSetup, NeonSetting } from './rooms/common';
 import { neonCave } from './rooms/neonCave';
 import { workshop } from './rooms/workshop';
 import { livingRoom } from './rooms/livingRoom';
@@ -36,13 +36,13 @@ interface CamAnim {
 const smooth = (x: number) => x * x * (3 - 2 * x);
 const easeInOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 
-function buildRoom(id: RoomId, style: RiderLook['style']): RoomSetup {
+function buildRoom(id: RoomId, style: RiderLook['style'], neon: NeonSetting): RoomSetup {
   switch (id) {
-    case 'workshop': return workshop(style);
-    case 'living': return livingRoom();
-    case 'loft': return industrialLoft();
+    case 'workshop': return workshop(style, neon);
+    case 'living': return livingRoom(neon);
+    case 'loft': return industrialLoft(neon);
     case 'neon':
-    default: return neonCave();
+    default: return neonCave(neon);
   }
 }
 
@@ -56,6 +56,7 @@ export class HomeScene implements View {
   private room!: RoomSetup;
   private roomId: RoomId | null = null;
   private roomStyle: RiderLook['style'] | null = null;
+  private roomNeon = '';
   private screen: THREE.Mesh;
   private t = 0;
   private tvCanvas: HTMLCanvasElement;
@@ -87,14 +88,16 @@ export class HomeScene implements View {
     this.scene.add(this.screen);
     this.rider = new RiderModel(look, { trainer: true });
     this.scene.add(this.rider.root);
-    this.setRoom(look.room ?? 'neon', look.style);
+    this.setRoom(look.room ?? 'neon', look.style, { color: look.neonColor, on: look.neonOn });
     this.drawTv(0);
     this.update(0);
   }
 
   /** Change de décor (sans toucher à l'avatar). */
-  setRoom(id: RoomId, style: RiderLook['style'] = 'smooth'): void {
-    if (id === this.roomId && style === this.roomStyle) return;
+  setRoom(id: RoomId, style: RiderLook['style'] = 'smooth', neon: NeonSetting = { color: '#ff3d9a', on: true }): void {
+    const neonKey = `${neon.color}/${neon.on}`;
+    if (id === this.roomId && style === this.roomStyle && neonKey === this.roomNeon) return;
+    this.roomNeon = neonKey;
     if (this.room) {
       this.scene.remove(this.room.group);
       this.room.group.traverse((o) => {
@@ -108,7 +111,7 @@ export class HomeScene implements View {
     }
     this.roomId = id;
     this.roomStyle = style;
-    this.room = buildRoom(id, style);
+    this.room = buildRoom(id, style, neon);
     this.scene.add(this.room.group);
     this.scene.background = new THREE.Color(this.room.background);
     this.scene.environmentIntensity = id === 'neon' || id === 'loft' ? 0.35 : 0.6;
@@ -126,7 +129,7 @@ export class HomeScene implements View {
     this.rider.dispose();
     this.rider = new RiderModel(look, { trainer: true });
     this.scene.add(this.rider.root);
-    this.setRoom(look.room ?? 'neon', look.style);
+    this.setRoom(look.room ?? 'neon', look.style, { color: look.neonColor, on: look.neonOn });
   }
 
   /** Cadrage : pièce entière, ou gros plan sur le cycliste (onglet Profil). */

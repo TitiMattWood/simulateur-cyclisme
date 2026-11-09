@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { RiderModel } from '../riderModel';
 import { defaultAppearance, type RiderLook } from '../look';
 import {
-  type RoomSetup, std, glow, texMat, concrete, blocks, pegboard, aoEdge, box, cyl, plant, fan, tvBezel, areaStrip, rng,
+  type RoomSetup, std, glow, texMat, concrete, blocks, pegboard, aoEdge, box, cyl, plant, fan, tvBezel, areaStrip, rng, type NeonSetting,
 } from './common';
 
 function hangingBike(g: THREE.Group, x: number, z: number, look: Partial<RiderLook>, style: RiderLook['style']): void {
@@ -22,7 +22,7 @@ function hangingBike(g: THREE.Group, x: number, z: number, look: Partial<RiderLo
   g.add(bike.root);
 }
 
-export function workshop(style: RiderLook['style'] = 'smooth'): RoomSetup {
+export function workshop(style: RiderLook['style'] = 'smooth', neon: NeonSetting = { color: '#4fc3ff', on: true }): RoomSetup {
   const g = new THREE.Group();
   const tv = { x: 3.15, y: 1.5, w: 1.55, h: 0.87 };
   const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -111,6 +111,8 @@ export function workshop(style: RiderLook['style'] = 'smooth'): RoomSetup {
     g.add(l, l.target);
   }
   areaStrip(g, '#eaf2ff', 6, V(-1.7, 2.5, -2.6), 1.6, 0.08, V(-1.7, 0, -2.4), { size: [1.6, 0.04, 0.08], at: V(-1.7, 2.52, -2.6) });
+  // ruban LED derrière la TV (couleur et interrupteur au profil)
+  if (neon.on) areaStrip(g, neon.color, 5, V(3.3, tv.y, 0), tv.w + 0.3, tv.h + 0.3, V(2.5, tv.y, 0), { size: [0.02, 0.02, tv.w + 0.1], at: V(3.25, tv.y + tv.h / 2 + 0.03, 0) });
   // lumière du jour qui passe sous la porte de garage
   areaStrip(g, '#cfe2ff', 3, V(-3.4, 0.1, 0.9), 2.6, 0.12, V(0, 0, 0.9));
 

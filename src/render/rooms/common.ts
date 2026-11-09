@@ -20,6 +20,17 @@ export interface RoomSetup {
   update?(t: number): void;
 }
 
+/** Réglage des néons de la pièce (couleur et interrupteur), choisi au profil. */
+export interface NeonSetting {
+  color: string;
+  on: boolean;
+}
+
+/** Teinte voisine (décalée sur le cercle des couleurs), pour un deuxième ruban assorti. */
+export function neighbourHue(hex: string, shift = 0.12): string {
+  return `#${new THREE.Color(hex).offsetHSL(shift, 0, 0).getHexString()}`;
+}
+
 let areaLightsReady = false;
 /** Les lumières rectangulaires (rubans LED, fenêtres) demandent une initialisation unique. */
 export function initAreaLights(): void {

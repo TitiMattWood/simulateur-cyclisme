@@ -16,8 +16,9 @@
 import * as THREE from 'three';
 import type { LocalProjection } from '../geo/projection';
 import { fetchElevations, fetchWfs, type BBox, type GeoFeature } from '../geo/ign';
-import { geoToLines, geoToPolys, polyArea } from './geometry';
+import { geoToPolys } from './geometry';
 import type { Exclusion } from './streamer';
+import axe from '../data/axeMajeur.json';
 
 const RANGE = 60000;
 
@@ -44,11 +45,6 @@ export class Landmarks {
   private local(lat: number, lon: number): { x: number; z: number; d: number } {
     const p = this.proj.toLocal(lat, lon);
     return { ...p, d: Math.hypot(p.x, p.z) };
-  }
-
-  private bbox(lat: number, lon: number, r: number): BBox {
-    const dLat = r / 111132, dLon = r / (111320 * Math.cos((lat * Math.PI) / 180));
-    return { minLat: lat - dLat, maxLat: lat + dLat, minLon: lon - dLon, maxLon: lon + dLon };
   }
 
   async load(): Promise<void> {
@@ -93,7 +89,7 @@ export class Landmarks {
     if ('belvedere' in base) {
       this.add(this.belvedere(), spots.belvedere, base.belvedere, false);
       this.exclusions.push({ ...this.local(spots.belvedere.lat, spots.belvedere.lon), r: 5 });
-      jobs.push(this.columns(spots.belvedere), this.passerelle());
+      jobs.push(this.axeMajeur());
     }
     if ('moulin' in base) {
       this.add(this.windmill(), spots.moulin, base.moulin, false);
@@ -295,74 +291,161 @@ export class Landmarks {
     g.add(new THREE.Mesh(new THREE.BoxGeometry(4.6, 36, 4.6).translate(0, 18, 0), mat));
     const crack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 30, 4.7).translate(0, 19, 0), lambert('#c9c6bd'));
     g.add(crack);
+    // la tour penche de 1,5° vers l'Axe Majeur (sud-est)
+    g.rotation.set(0, Math.PI * 0.2, (1.5 * Math.PI) / 180);
     return { obj: g, center: new THREE.Vector3(), far: [] };
   }
 
-  /** Colonnes de l'esplanade : piliers fins (< 12 m² au sol, > 10 m) recensés par la BD TOPO, rendus en colonnes blanches. */
-  private async columns(at: { lat: number; lon: number }): Promise<void> {
-    const feats = await fetchWfs('batiment', this.bbox(at.lat, at.lon, 400), ['hauteur', 'nature']);
-    const mat = lambert('#f4f2ec');
+  /**
+   * Axe Majeur de Dani Karavan, d'après les relevés OpenStreetMap (positions exactes) :
+   * Douze Colonnes (béton blanc, ≈ 12 m), Esplanade de Paris et Terrasse (dallages),
+   * Amphithéâtre (800 places, gradins au pied du coteau) et Passerelle rouge (≈ 330 m)
+   * qui franchit la route et l'étang vers l'île astronomique.
+   */
+  private async axeMajeur(): Promise<void> {
+    const P = (ll: number[]) => this.local(ll[0], ll[1]);
     const group = new THREE.Group();
-    const cols: Array<{ cx: number; cz: number; area: number; h: number }> = [];
-    for (const f of feats) {
-      const polys = geoToPolys(f.geometry, this.proj);
-      if (!polys.length) continue;
-      const ring = polys[0].outer;
-      const area = Math.abs(polyArea(ring));
-      const h = Number(f.properties.hauteur);
-      if (!(area < 12 && h > 10)) continue;
-      let cx = 0, cz = 0;
-      for (const [x, z] of ring) { cx += x; cz += z; }
-      cols.push({ cx: cx / ring.length, cz: cz / ring.length, area, h });
-    }
-    const alt = await this.altitudes(cols.map((c) => [c.cx, c.cz]));
-    cols.forEach(({ cx, cz, area, h }, i) => {
-      const r = Math.max(0.5, Math.sqrt(area / Math.PI));
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.05, h, 10).translate(0, h / 2, 0), mat);
-      col.position.set(cx, alt[i] - 0.3, cz);
-      group.add(col);
-      this.exclusions.push({ x: cx, z: cz, r: r + 1.5 });
-    });
-    this.group.add(group);
-    this.items.push({ obj: group, center: new THREE.Vector3(), far: [] });
-  }
+    const concrete = new THREE.MeshStandardMaterial({ color: '#f2f0ea', roughness: 0.75 });
+    const paving = new THREE.MeshStandardMaterial({ color: '#d9d4c8', roughness: 0.9 });
+    const stone = new THREE.MeshStandardMaterial({ color: '#c2ad8a', roughness: 0.9 });
+    const stoneDark = new THREE.MeshStandardMaterial({ color: '#7f705a', roughness: 0.95, side: THREE.DoubleSide });
+    const red = new THREE.MeshStandardMaterial({ color: '#d1232a', roughness: 0.45, metalness: 0.35 });
 
-  /** Passerelle rouge de l'Axe Majeur, d'après la ligne « Pont – Passerelle » de la BD TOPO. */
-  private async passerelle(): Promise<void> {
-    const b: BBox = { minLat: 49.036, maxLat: 49.041, minLon: 2.039, maxLon: 2.046 };
-    const feats = await fetchWfs('construction_lineaire', b, ['nature', 'nature_detaillee']);
-    const red = lambert('#c62f2b');
-    const group = new THREE.Group();
-    for (const f of feats) {
-      if (f.properties.nature_detaillee !== 'Passerelle') continue;
-      for (const line of geoToLines(f.geometry, this.proj)) {
-        const len = line.reduce((a, p, i) => (i ? a + Math.hypot(p[0] - line[i - 1][0], p[2] - line[i - 1][2]) : 0), 0);
-        if (len < 50) continue;
-        const piers: Array<[number, number]> = [];
-        for (let i = 0; i < line.length - 1; i++) {
-          const [ax, ay, az] = line[i], [bx, by, bz] = line[i + 1];
-          const l = Math.hypot(bx - ax, bz - az);
-          const yA = Number.isFinite(ay) ? ay : 31, yB = Number.isFinite(by) ? by : 31;
-          const deck = new THREE.Mesh(new THREE.BoxGeometry(l, 0.7, 3.4), red);
-          deck.position.set((ax + bx) / 2, (yA + yB) / 2 - 0.35, (az + bz) / 2);
-          deck.rotation.y = -Math.atan2(bz - az, bx - ax);
-          group.add(deck);
-          for (const side of [-1.6, 1.6]) {
-            const rail = new THREE.Mesh(new THREE.BoxGeometry(l, 1.1, 0.12), red);
-            rail.position.set(0, 0.9, side);
-            deck.add(rail);
+    // altitudes du sol pour tout ce qu'on pose
+    const cols = axe.columns.map((c) => ({ ...P([c.lat, c.lon]), r: c.r }));
+    // La passerelle est décrite par son contour : on en tire l'axe (les deux points les plus
+    // éloignés) et la largeur (écart du contour à cet axe), puis on échantillonne l'axe.
+    const outline = axe.passerelle.map(P);
+    let e0 = outline[0], e1 = outline[1], best = 0;
+    for (const a of outline) for (const b of outline) {
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      if (d > best) { best = d; e0 = a; e1 = b; }
+    }
+    const ux = (e1.x - e0.x) / (best || 1), uz = (e1.z - e0.z) / (best || 1);
+    const halfW = Math.min(3.5, Math.max(1.6, Math.max(...outline.map((p) => Math.abs(-(p.x - e0.x) * uz + (p.z - e0.z) * ux)))));
+    // l'extrémité côté amphithéâtre en premier (la plus proche du centre des gradins)
+    const ax0 = axe.amphitheatre.flat().map(P);
+    const amx = ax0.reduce((s, p) => s + p.x, 0) / Math.max(1, ax0.length), amz = ax0.reduce((s, p) => s + p.z, 0) / Math.max(1, ax0.length);
+    if (Math.hypot(e1.x - amx, e1.z - amz) < Math.hypot(e0.x - amx, e0.z - amz)) [e0, e1] = [e1, e0];
+    const nSeg = Math.max(2, Math.round(best / 12));
+    const bridge = Array.from({ length: nSeg + 1 }, (_, i) => ({ x: e0.x + ((e1.x - e0.x) * i) / nSeg, z: e0.z + ((e1.z - e0.z) * i) / nSeg, d: 0 }));
+    const amphiPts = axe.amphitheatre.flat().map(P);
+    const esp = axe.esplanade.map(P);
+    const ter = axe.terrace.map(P);
+    const all = [...cols, ...bridge, ...amphiPts, ...esp, ...ter];
+    const alt = await this.altitudes(all.map((p) => [p.x, p.z]));
+    let k = 0;
+    const take = (n: number) => alt.slice(k, (k += n));
+    const aCols = take(cols.length), aBridge = take(bridge.length), aAmphi = take(amphiPts.length), aEsp = take(esp.length), aTer = take(ter.length);
+
+    // ----- Douze Colonnes
+    cols.forEach((c, i) => {
+      const h = 12;
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(c.r, c.r * 1.02, h, 20).translate(0, h / 2, 0), concrete);
+      col.position.set(c.x, aCols[i] - 0.2, c.z);
+      col.castShadow = true;
+      group.add(col);
+      this.exclusions.push({ x: c.x, z: c.z, r: c.r + 1.5 });
+    });
+
+    // ----- Dallages de l'Esplanade de Paris et de la Terrasse
+    const slab = (ring: Array<{ x: number; z: number }>, a: number[]) => {
+      if (ring.length < 3) return;
+      // posé au niveau du point le plus bas : le reste se fond dans le terrain
+      const y = Math.min(...a) - 0.05;
+      const shape = new THREE.Shape(ring.map((p) => new THREE.Vector2(p.x, -p.z)));
+      const geo = new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2);
+      const m = new THREE.Mesh(geo, paving);
+      m.position.y = y + 0.12;
+      m.receiveShadow = true;
+      group.add(m);
+    };
+    slab(esp, aEsp);
+    slab(ter, aTer);
+
+    // ----- Amphithéâtre : gradins en arc de cercle ouverts vers la passerelle
+    if (amphiPts.length) {
+      const mx = amphiPts.reduce((s, p) => s + p.x, 0) / amphiPts.length;
+      const mz = amphiPts.reduce((s, p) => s + p.z, 0) / amphiPts.length;
+      const rMax = Math.max(...amphiPts.map((p) => Math.hypot(p.x - mx, p.z - mz)));
+      const base = Math.min(...aAmphi);
+      // la scène est du côté de la passerelle : les gradins montent vers le coteau ;
+      // le centre de l'arc (la scène) est donc décalé vers la passerelle
+      const toStage = Math.atan2(bridge[0].z - mz, bridge[0].x - mx);
+      const cx = mx + Math.cos(toStage) * rMax * 0.4, cz = mz + Math.sin(toStage) * rMax * 0.4;
+      // gradins creusés dans le coteau : du bas (scène) jusqu'au niveau du haut de la pente
+      const top = Math.max(...aAmphi) + 0.4;
+      const steps = 12;
+      const rise = Math.max(0.4, (top - base) / steps);
+      for (let i = 0; i < steps; i++) {
+        const r0 = rMax * (0.25 + (0.75 * i) / steps), r1 = rMax * (0.25 + (0.75 * (i + 1)) / steps);
+        const ring = new THREE.RingGeometry(r0, r1, 40, 1, 0, Math.PI);
+        const step = new THREE.Mesh(ring.rotateX(-Math.PI / 2), stone);
+        // l'arc (demi-disque) est tourné pour regarder la scène
+        step.rotation.y = -toStage + Math.PI / 2;
+        step.position.set(cx, base + rise * (i + 1), cz);
+        step.receiveShadow = true;
+        group.add(step);
+        // contremarche
+        const riser = new THREE.Mesh(new THREE.CylinderGeometry(r0, r0, rise, 40, 1, true, 0, Math.PI), stoneDark);
+        riser.rotation.y = -toStage + Math.PI;
+        riser.position.set(cx, base + rise * (i + 0.5), cz);
+        group.add(riser);
+      }
+      // dos de l'amphithéâtre : mur de soutènement qui descend jusqu'au sol
+      const back = new THREE.Mesh(new THREE.CylinderGeometry(rMax, rMax, top - base + 2, 40, 1, true, 0, Math.PI), stoneDark);
+      back.rotation.y = -toStage + Math.PI;
+      back.position.set(cx, base + (top - base) / 2 - 1, cz);
+      group.add(back);
+      // scène circulaire
+      const stage = new THREE.Mesh(new THREE.CylinderGeometry(rMax * 0.24, rMax * 0.24, 0.3, 32), paving);
+      stage.position.set(cx, base + 0.15, cz);
+      group.add(stage);
+      this.exclusions.push({ x: cx, z: cz, r: rMax });
+    }
+
+    // ----- Passerelle rouge : tablier quasi horizontal, au-dessus de la route et de l'étang
+    if (bridge.length > 1) {
+      const n = bridge.length;
+      const start = aBridge[0] + 0.6, end = aBridge[n - 1] + 0.6;
+      const deckY: number[] = [];
+      let s0 = 0;
+      const cum = bridge.map((p, i) => (i ? (s0 += Math.hypot(p.x - bridge[i - 1].x, p.z - bridge[i - 1].z)) : 0));
+      const total = cum[n - 1] || 1;
+      bridge.forEach((_, i) => deckY.push(Math.max(start + ((end - start) * cum[i]) / total, aBridge[i] + 4.5)));
+      // lissage du profil
+      for (let it = 0; it < 4; it++) for (let i = 1; i < n - 1; i++) deckY[i] = Math.max(aBridge[i] + 4.5, (deckY[i - 1] + deckY[i] * 2 + deckY[i + 1]) / 4);
+      for (let i = 0; i < n - 1; i++) {
+        const a = bridge[i], b = bridge[i + 1];
+        const l = Math.hypot(b.x - a.x, b.z - a.z);
+        if (l < 0.01) continue;
+        const ya = deckY[i], yb = deckY[i + 1];
+        const seg = new THREE.Group();
+        seg.position.set((a.x + b.x) / 2, (ya + yb) / 2, (a.z + b.z) / 2);
+        seg.rotation.y = -Math.atan2(b.z - a.z, b.x - a.x);
+        seg.rotation.z = Math.atan2(yb - ya, l);
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(l + 0.05, 0.9, halfW * 2), red);
+        deck.castShadow = true;
+        seg.add(deck);
+        for (const side of [-halfW + 0.05, halfW - 0.05]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(l + 0.05, 0.08, 0.08), red);
+          rail.position.set(0, 1.55, side);
+          seg.add(rail);
+          for (let x = -l / 2; x < l / 2; x += 2.2) {
+            const post = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.1, 0.08), red);
+            post.position.set(x, 1.0, side);
+            seg.add(post);
           }
-          for (let s = 0; s < l; s += 32) piers.push([ax + ((bx - ax) * s) / l, az + ((bz - az) * s) / l]);
         }
-        const ground = await this.altitudes(piers);
-        const deckY = Number.isFinite(line[0][1]) ? line[0][1] : 31;
-        piers.forEach(([x, z], i) => {
-          const hgt = deckY - ground[i];
-          if (hgt < 1) return;
-          const pier = new THREE.Mesh(new THREE.BoxGeometry(1.2, hgt, 1.2).translate(0, hgt / 2, 0), red);
-          pier.position.set(x, ground[i], z);
+        group.add(seg);
+        // piles tous les ~30 m là où le tablier est haut
+        if (ya - aBridge[i] > 1.5) {
+          const hgt = ya - aBridge[i];
+          const pier = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, hgt, 12).translate(0, hgt / 2, 0), red);
+          pier.position.set(a.x, aBridge[i] - 0.5, a.z);
+          pier.castShadow = true;
           group.add(pier);
-        });
+        }
       }
     }
     this.group.add(group);

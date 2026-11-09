@@ -310,4 +310,6 @@ export const en: Record<keyof typeof fr, string> = {
   'click.connecting': 'connecting…',
   'click.connected': 'connected',
   'click.error': 'connection failed',
+  'pf.neonOn': 'Neon lights on',
+  'pf.neonColor': 'Neon colour',
 };
