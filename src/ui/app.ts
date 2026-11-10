@@ -492,7 +492,7 @@ export class App {
     const bike = `
       <div class="grid2">
         ${sel('pf-frame', 'pf.frame', ['climb', 'aero', 'gravel', 'tt', 'mtb'] as const, p.frame, tr('frame'))}
-        ${sel('pf-wheels', 'pf.wheels', ['alu', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
+        ${sel('pf-wheels', 'pf.wheels', ['alu', 'alu30', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
       </div>
       <div class="grid3">
         ${color('pf-fc', 'pf.frameColor', a.frameColor)}

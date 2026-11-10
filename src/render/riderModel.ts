@@ -825,7 +825,9 @@ export class RiderModel {
     const mTan = lam('#b98d5c');
     const TIRE_COLORS: Record<string, string> = { blue: '#1f5fd0', red: '#c8202a', white: '#e9e9e9', yellow: '#f2c21b', green: '#2e9e4f' };
     const mTireColor = TIRE_COLORS[look.tireWall] ? lam(TIRE_COLORS[look.tireWall], { roughness: 0.7 }) : null;
-    const mRim = look.wheels === 'alu' ? shiny('#3a3d41', 50) : shiny('#1d1e20', 70, '#666666');
+    // roues aluminium (jante basse ou 30 mm) : jante métal, rayons argentés, sans décor
+    const alloy = look.wheels === 'alu' || look.wheels === 'alu30';
+    const mRim = alloy ? shiny('#3a3d41', 50) : shiny('#1d1e20', 70, '#666666');
     const mDecalW = lam('#d9dde0', { side: THREE.DoubleSide });
     const mTape = lam(look.barTape);
     const mSaddle = lam(look.saddleColor);
@@ -1225,7 +1227,7 @@ export class RiderModel {
         ring.position.z = z;
         (ring.material as THREE.Material).side = THREE.DoubleSide;
         w.add(ring);
-        if (look.wheels !== 'alu') {
+        if (!alloy) {
           // décor de jante générique
           for (const a0 of [0.3, 0.3 + Math.PI]) {
             const dec = new THREE.Mesh(new THREE.RingGeometry(rimIn + 0.25 * (rimOut - rimIn), rimIn + 0.7 * (rimOut - rimIn), 16, 1, a0, 0.9), mDecalW);
@@ -1235,7 +1237,7 @@ export class RiderModel {
         }
       }
       // rayons (lignes fines) : alternés gauche/droite
-      const nSpokes = look.wheels === 'alu' ? 28 : 24;
+      const nSpokes = alloy ? 28 : 24;
       const pts: number[] = [];
       for (let k = 0; k < nSpokes; k++) {
         const a = (k / nSpokes) * Math.PI * 2;
@@ -1245,7 +1247,7 @@ export class RiderModel {
       }
       const sg = new THREE.BufferGeometry();
       sg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-      const lm = new THREE.LineBasicMaterial({ color: look.wheels === 'alu' ? '#8d9399' : '#202224' });
+      const lm = new THREE.LineBasicMaterial({ color: alloy ? '#8d9399' : '#202224' });
       own.push(lm);
       w.add(new THREE.LineSegments(sg, lm));
       // moyeu

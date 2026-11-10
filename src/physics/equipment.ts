@@ -11,7 +11,7 @@
  */
 
 export type FrameId = 'climb' | 'aero' | 'gravel' | 'tt' | 'mtb';
-export type WheelId = 'alu' | 'c30' | 'c40' | 'c45' | 'c50' | 'c55' | 'c88';
+export type WheelId = 'alu' | 'alu30' | 'c30' | 'c40' | 'c45' | 'c50' | 'c55' | 'c88';
 export type SurfaceId = 'asphalt' | 'rough' | 'gravel' | 'dirt';
 
 export interface Frame {
@@ -47,6 +47,8 @@ export interface Wheelset {
 
 export const WHEELS: Record<WheelId, Wheelset> = {
   alu: { id: 'alu', massDelta: 0, cdaDelta: 0, rimDepth: 22 },
+  // aluminium 30 mm : un peu plus aéro que la jante basse, mais plus lourde
+  alu30: { id: 'alu30', massDelta: 0.15, cdaDelta: -0.0015, rimDepth: 30 },
   c30: { id: 'c30', massDelta: -0.5, cdaDelta: -0.0025, rimDepth: 30 },
   c40: { id: 'c40', massDelta: -0.45, cdaDelta: -0.004, rimDepth: 40 },
   c45: { id: 'c45', massDelta: -0.42, cdaDelta: -0.0048, rimDepth: 45 },

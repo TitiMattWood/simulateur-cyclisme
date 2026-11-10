@@ -106,6 +106,7 @@ export const fr = {
   'frame.aero': 'Route (aéro)',
   'frame.mtb': 'VTT',
   'wheel.alu': 'Aluminium',
+  'wheel.alu30': 'Aluminium 30 mm',
   'wheel.c30': 'Carbone 30 mm',
   'wheel.c40': 'Carbone 40 mm',
   'wheel.c45': 'Carbone 45 mm',

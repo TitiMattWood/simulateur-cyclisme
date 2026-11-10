@@ -108,6 +108,7 @@ export const en: Record<keyof typeof fr, string> = {
   'frame.aero': 'Road (aero)',
   'frame.mtb': 'Mountain bike',
   'wheel.alu': 'Aluminium',
+  'wheel.alu30': 'Alloy 30 mm',
   'wheel.c30': 'Carbon 30 mm',
   'wheel.c40': 'Carbon 40 mm',
   'wheel.c45': 'Carbon 45 mm',
