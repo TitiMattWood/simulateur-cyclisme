@@ -101,6 +101,17 @@ export class DeviceManager {
     return undefined;
   }
 
+  /** Mesures réelles uniquement (aucune simulation) : null quand le capteur manque. */
+  liveReal(): { trainer: boolean; power: number | null; cadence: number | null; hr: number | null } {
+    const now = performance.now();
+    return {
+      trainer: this.sensors.trainer?.status === 'connected' || this.sensors.power?.status === 'connected',
+      power: this.pick(this.power, ['power', 'trainer'], now) ?? null,
+      cadence: this.pick(this.cadence, ['power', 'cadence', 'trainer'], now) ?? null,
+      hr: this.pick(this.hr, ['hr', 'trainer'], now) ?? null,
+    };
+  }
+
   /** vrai si une vraie source de puissance est disponible */
   get hasPowerSource(): boolean {
     return !this.demoForced && (['power', 'trainer'] as SensorKind[]).some((k) => this.sensors[k]?.status === 'connected');

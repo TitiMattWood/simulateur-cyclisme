@@ -76,6 +76,15 @@ export class App {
     this.engine = new Engine(canvas, QUALITY[this.save.profile.quality]);
     this.home = new HomeScene(this.look(), this.engine.environment());
     this.home.attachControls(canvas);
+    // TV de l'accueil : vraies mesures du trainer et du cardio, 4 fois par seconde
+    window.setInterval(() => {
+      if (this.ride) return;
+      const l = this.devices.liveReal();
+      const p = this.profile;
+      const params = buildParams({ weightKg: p.weightKg, heightCm: p.heightCm, frame: p.frame, wheels: p.wheels, kit: p.kit });
+      const kmh = l.trainer && l.power ? steadySpeed(l.power, { grade: 0, headwind: 0, rho: airDensity(0), crr: crrFor(p.frame, 'asphalt'), draft: 1 }, params) * 3.6 : 0;
+      this.home.setLive({ ...l, kmh });
+    }, 250);
     this.engine.setView(this.home);
     this.engine.start();
     this.devices.onChange = () => { if (this.tab === 'devices' && !this.ride) this.renderHome(); };

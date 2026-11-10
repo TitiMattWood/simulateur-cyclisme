@@ -317,4 +317,6 @@ export const fr = {
   'setup.signSprints': 'Sprints pancartes à l\'entrée des villes (+30 XP par victoire)',
   'rep.sprints': 'Sprints pancartes gagnés',
   'home.hint': 'Clic-glisser pour tourner autour · molette pour zoomer · double-clic pour revenir',
+  'tv.noTrainer': 'Home trainer non connecté',
+  'tv.connectHint': 'Va dans l’onglet Capteurs pour le connecter',
 };

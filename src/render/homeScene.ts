@@ -8,6 +8,7 @@
  * - Retour de sortie : la caméra ressort de la TV (exitTv).
  */
 import * as THREE from 'three';
+import { t as t9 } from '../i18n';
 import type { View } from './engine';
 import type { BloomStyle } from './post';
 import { RiderModel, type RiderLook } from './riderModel';
@@ -22,6 +23,16 @@ import { industrialLoft } from './rooms/industrialLoft';
 const RIDER_TARGET = new THREE.Vector3(0.5, 0.95, 0);
 
 type Focus = 'room' | 'rider';
+
+/** Mesures affichées sur la TV de l'accueil. */
+export interface TvLive {
+  trainer: boolean;
+  power: number | null;
+  cadence: number | null;
+  hr: number | null;
+  /** vitesse estimée (km/h) d'après la puissance */
+  kmh: number;
+}
 
 interface CamAnim {
   kind: 'enter' | 'exit';
@@ -71,6 +82,9 @@ export class HomeScene implements View {
   /** décalage horizontal du cadrage, pour laisser la place au panneau de gauche */
   private shift = 0;
   private camTarget = RIDER_TARGET.clone();
+  private live: TvLive = { trainer: false, power: null, cadence: null, hr: null, kmh: 0 };
+  /** distance parcourue par le paysage de la TV (m) */
+  private tvDist = 0;
   /** le moteur est prévenu quand le décor change (halo, exposition) */
   onRoomChange?: () => void;
 
@@ -242,7 +256,9 @@ export class HomeScene implements View {
 
   update(dt: number): void {
     this.t += dt;
-    this.rider.update(dt, 82);
+    // l'avatar pédale à la vraie cadence quand le trainer est connecté
+    this.rider.update(dt, this.live.trainer ? this.live.cadence ?? 0 : 82);
+    this.tvDist += (this.live.kmh / 3.6) * dt;
     this.room.update?.(this.t);
     // écran de la TV rafraîchi ~30 fois par seconde
     this.tvClock += dt;
@@ -308,8 +324,92 @@ export class HomeScene implements View {
     else cam.clearViewOffset();
   }
 
-  /** Dessine l'image de la TV : une route de campagne qui défile, avec quelques chiffres. */
+  /** Valeurs du home trainer et du cardio affichées sur la TV (null = capteur absent). */
+  setLive(l: TvLive): void {
+    this.live = l;
+  }
+
+  /** Dessine l'image de la TV : écran « 404 » sans trainer, sinon la route qui défile et les vraies valeurs. */
   private drawTv(t: number): void {
+    if (!this.live.trainer) {
+      this.draw404(t);
+    } else {
+      // le paysage avance à la vitesse réelle (immobile si on ne pédale pas)
+      this.drawLandscape(this.tvDist / 8.75);
+      const g = this.tvCtx, W = 512;
+      g.fillStyle = 'rgba(15,18,22,0.72)';
+      g.fillRect(0, 0, W, 34);
+      g.fillStyle = '#ffffff';
+      g.font = 'bold 20px system-ui, sans-serif';
+      g.textBaseline = 'middle';
+      const l = this.live;
+      g.fillText(`${Math.round(l.power ?? 0)} W`, 14, 18);
+      g.fillText(`${l.kmh.toFixed(1).replace('.', ',')} km/h`, 130, 18);
+      g.fillText(`${Math.round(l.cadence ?? 0)} rpm`, 285, 18);
+      if (l.hr !== null) {
+        g.fillStyle = '#ff5a6a';
+        g.fillText(`♥ ${Math.round(l.hr)}`, 410, 18);
+      }
+    }
+    this.tvTex.needsUpdate = true;
+  }
+
+  /** Écran « Erreur 404 – Home trainer non connecté ». */
+  private draw404(t: number): void {
+    const g = this.tvCtx, W = 512, H = 288;
+    const bg = g.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, W * 0.7);
+    bg.addColorStop(0, '#1b2a4a');
+    bg.addColorStop(1, '#0a0f1c');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+    // neige légère (vieille TV)
+    for (let k = 0; k < 260; k++) {
+      g.fillStyle = `rgba(255,255,255,${Math.random() * 0.12})`;
+      g.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+    }
+    // ligne de balayage qui descend
+    const sy = ((t * 60) % (H + 40)) - 20;
+    g.fillStyle = 'rgba(255,255,255,0.05)';
+    g.fillRect(0, sy, W, 14);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    const blink = Math.sin(t * 3) > -0.6;
+    g.fillStyle = blink ? '#ff5a3c' : '#a8321f';
+    g.font = '900 96px system-ui, sans-serif';
+    g.fillText('404', W / 2, 98);
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 24px system-ui, sans-serif';
+    g.fillText(t9('tv.noTrainer'), W / 2, 168);
+    g.fillStyle = '#9fb3c8';
+    g.font = '16px system-ui, sans-serif';
+    g.fillText(t9('tv.connectHint'), W / 2, 200);
+    // petit vélo barré
+    g.strokeStyle = '#9fb3c8';
+    g.lineWidth = 3;
+    const cx = W / 2, cy = 244;
+    g.beginPath();
+    g.arc(cx - 22, cy, 12, 0, Math.PI * 2);
+    g.arc(cx + 22, cy, 12, 0, Math.PI * 2);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(cx - 22, cy); g.lineTo(cx - 4, cy - 16); g.lineTo(cx + 12, cy - 16); g.lineTo(cx + 22, cy); g.moveTo(cx - 4, cy - 16); g.lineTo(cx + 2, cy);
+    g.stroke();
+    g.strokeStyle = '#ff5a3c';
+    g.beginPath();
+    g.moveTo(cx - 40, cy + 18); g.lineTo(cx + 40, cy - 30);
+    g.stroke();
+    // fréquence cardiaque même sans trainer (montre ou ceinture connectée)
+    if (this.live.hr !== null) {
+      g.textAlign = 'right';
+      g.fillStyle = '#ff5a6a';
+      g.font = 'bold 22px system-ui, sans-serif';
+      g.fillText(`♥ ${Math.round(this.live.hr)} bpm`, W - 16, 24);
+    }
+    g.textAlign = 'left';
+  }
+
+  /** Route de campagne qui défile (t = avancement). */
+  private drawLandscape(t: number): void {
     const g = this.tvCtx, W = 512, H = 288;
     const sky = g.createLinearGradient(0, 0, 0, H * 0.5);
     sky.addColorStop(0, '#5aa0e6');
@@ -367,18 +467,6 @@ export class HomeScene implements View {
         g.fill();
       }
     }
-    // bandeau de chiffres façon tableau de bord
-    g.fillStyle = 'rgba(15,18,22,0.72)';
-    g.fillRect(0, 0, W, 34);
-    g.fillStyle = '#ffffff';
-    g.font = 'bold 20px system-ui, sans-serif';
-    g.textBaseline = 'middle';
-    const watts = Math.round(215 + Math.sin(t * 0.7) * 18);
-    const kmh = (31.5 + Math.sin(t * 0.4) * 1.6).toFixed(1).replace('.', ',');
-    g.fillText(`${watts} W`, 16, 18);
-    g.fillText(`${kmh} km/h`, 200, 18);
-    g.fillText('82 rpm', 390, 18);
-    this.tvTex.needsUpdate = true;
   }
 }
 
