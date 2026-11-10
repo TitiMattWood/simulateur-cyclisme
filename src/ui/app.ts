@@ -9,6 +9,7 @@ import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
 import { ZwiftClick } from '../devices/zwiftClick';
+import { watchForUpdates } from '../version';
 import { loadSave, writeSave, exportBackup, importBackup, type SaveData, type Profile } from '../storage/store';
 import { parseGpx } from '../geo/gpx';
 import { Route } from '../geo/route';
@@ -66,6 +67,8 @@ export class App {
   private message = '';
   /** sections du profil dépliées */
   private pfOpen = new Set<string>(['rider', 'kit', 'bike']);
+  /** une nouvelle version est en ligne */
+  private updateReady = false;
   /** vrai pendant l'animation d'entrée dans la TV */
   private entering = false;
 
@@ -76,6 +79,11 @@ export class App {
     this.engine = new Engine(canvas, QUALITY[this.save.profile.quality]);
     this.home = new HomeScene(this.look(), this.engine.environment());
     this.home.attachControls(canvas);
+    // Nouvelle version en ligne : bandeau « Recharger » (affiché sur l'accueil, jamais en pleine sortie)
+    watchForUpdates(() => {
+      this.updateReady = true;
+      if (!this.ride) this.showUpdateBanner();
+    });
     // TV de l'accueil : vraies mesures du trainer et du cardio, 4 fois par seconde
     window.setInterval(() => {
       if (this.ride) return;
@@ -920,6 +928,17 @@ export class App {
     });
   }
 
+  /** Bandeau « Nouvelle version disponible ». Ta sauvegarde est conservée au rechargement. */
+  private showUpdateBanner(): void {
+    if (document.querySelector('.update-banner')) return;
+    const b = document.createElement('div');
+    b.className = 'update-banner';
+    b.innerHTML = `<span>✨ ${t('upd.text')}</span><button class="primary">${t('upd.reload')}</button><button class="ghost" aria-label="${t('upd.later')}">✕</button>`;
+    b.querySelector('.primary')!.addEventListener('click', () => location.reload());
+    b.querySelector('.ghost')!.addEventListener('click', () => b.remove());
+    document.body.appendChild(b);
+  }
+
   private exitRide(): void {
     this.ride?.dispose();
     this.ride = null;
@@ -928,6 +947,7 @@ export class App {
     this.tab = this.message ? this.tab : 'history';
     if (!this.save.history.length) this.tab = 'ride';
     this.renderHome();
+    if (this.updateReady) this.showUpdateBanner();
   }
 }
 
