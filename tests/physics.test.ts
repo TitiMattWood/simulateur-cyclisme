@@ -59,3 +59,11 @@ describe('physique', () => {
     expect(up.v).toBe(0);
   });
 });
+
+describe('roues carbone', () => {
+  it('plus la jante est haute, plus elle est aérodynamique', async () => {
+    const { WHEELS } = await import('../src/physics/equipment');
+    const order = ['alu', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const;
+    for (let i = 1; i < order.length; i++) expect(WHEELS[order[i]].cdaDelta).toBeLessThan(WHEELS[order[i - 1]].cdaDelta);
+  });
+});
