@@ -325,4 +325,7 @@ export const en: Record<keyof typeof fr, string> = {
   'home.hint': 'Drag to look around · scroll to zoom · double-click to reset',
   'tv.noTrainer': 'Smart trainer not connected',
   'tv.connectHint': 'Open the Sensors tab to connect it',
+  'upd.text': 'A new version of MyHomeRide is available',
+  'upd.reload': 'Reload',
+  'upd.later': 'Later',
 };
