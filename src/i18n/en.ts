@@ -319,4 +319,6 @@ export const en: Record<keyof typeof fr, string> = {
   'setup.signSprints': 'Town sign sprints (+30 XP per win)',
   'rep.sprints': 'Town sign sprints won',
   'home.hint': 'Drag to look around · scroll to zoom · double-click to reset',
+  'tv.noTrainer': 'Smart trainer not connected',
+  'tv.connectHint': 'Open the Sensors tab to connect it',
 };
