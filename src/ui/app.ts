@@ -492,7 +492,7 @@ export class App {
     const bike = `
       <div class="grid2">
         ${sel('pf-frame', 'pf.frame', ['climb', 'aero', 'gravel', 'tt', 'mtb'] as const, p.frame, tr('frame'))}
-        ${sel('pf-wheels', 'pf.wheels', ['alu', 'c40', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
+        ${sel('pf-wheels', 'pf.wheels', ['alu', 'alu30', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
       </div>
       <div class="grid3">
         ${color('pf-fc', 'pf.frameColor', a.frameColor)}
@@ -561,8 +561,9 @@ export class App {
         ${section('rider', 'pf.sec.rider', rider)}
         ${section('kit', 'pf.sec.kit', kit)}
         ${section('bike', 'pf.sec.bike', bike)}
-        <p class="hint" id="pf-physics">${t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) })}</p>
-        <div class="effect" id="pf-effect">${roadEffectHtml(p)}</div>
+        ${section('effect', 'effect.title', `
+          <p class="hint" id="pf-physics">${t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) })}</p>
+          <div class="effect" id="pf-effect">${roadEffectHtml(p)}</div>`)}
         ${section('drive', 'pf.sec.drive', drive)}
         ${section('display', 'pf.sec.display', display)}
         <p class="hint preview-note" id="pf-dirty" hidden>${t('pf.preview')}</p>
@@ -952,7 +953,6 @@ function roadEffectHtml(p: Profile): string {
     return `<td class="${d > 0.005 ? 'pos' : d < -0.005 ? 'neg' : ''}">${v}</td>`;
   };
   return `
-    <h4>${t('effect.title')}</h4>
     <table><thead><tr><th></th><th>${t('effect.flat')}</th><th>${t('effect.climb')}</th></tr></thead><tbody>
       ${rows.map(([k, su]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${cell(speed(su, 0) - f0)}${cell(speed(su, 0.08) - c0)}</tr>`).join('')}
     </tbody></table>
