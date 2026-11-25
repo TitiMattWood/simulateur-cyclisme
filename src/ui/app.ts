@@ -22,6 +22,7 @@ import { encodeGpx } from '../export/gpx';
 import { downloadFile, safeFilename } from '../export/download';
 import { levelFromXp } from '../ride/metrics';
 import { DIFFICULTY_RANGE, type Difficulty } from '../ride/ai/roster';
+import { MAX_AI } from '../ride/ai/peloton';
 import { buildParams, steadySpeed, airDensity, crrFor, type RiderSetup } from '../physics/model';
 import { CAM_MODES } from '../render/cameras';
 import { ROUTES, type RouteEntry, type WorldId } from '../data/routes';
@@ -231,7 +232,7 @@ export class App {
       </div>`;
     const settings = su.mode === 'group' ? `
       <div class="mode-settings">
-        <label>${t('setup.riders', { n: su.riders })}<input type="range" id="su-riders" min="1" max="30" value="${su.riders}"></label>
+        <label>${t('setup.riders', { n: su.riders, total: su.riders + 1 })}<input type="range" id="su-riders" min="1" max="${MAX_AI}" value="${su.riders}"></label>
         <label>${t('setup.pace', { p: Math.round(su.pace * 100), w: Math.round(su.pace * this.profile.ftp) })}<input type="range" id="su-pace" min="50" max="90" step="5" value="${Math.round(su.pace * 100)}"></label>
         <label class="check"><input type="checkbox" id="su-wait" ${su.wait ? 'checked' : ''}> ${t('setup.wait')}</label>
         <label class="check"><input type="checkbox" id="su-relay" ${su.relay ? 'checked' : ''}> ${t('setup.relay')}</label>
@@ -240,7 +241,7 @@ export class App {
       </div>` : su.mode === 'race' ? `
       <div class="mode-settings">
         <div class="seg">${(Object.keys(DIFFICULTY_RANGE) as Difficulty[]).map((d) => `<button data-level="${d}" class="${su.difficulty === d ? 'sel' : ''}">${t(`level.${d}` as I18nKey)}<small>${Math.round(DIFFICULTY_RANGE[d][0] * 100)}–${Math.round(DIFFICULTY_RANGE[d][1] * 100)} % FTP</small></button>`).join('')}</div>
-        <label>${t('setup.rivals', { n: su.riders })}<input type="range" id="su-riders" min="1" max="30" value="${su.riders}"></label>
+        <label>${t('setup.rivals', { n: su.riders, total: su.riders + 1 })}<input type="range" id="su-riders" min="1" max="${MAX_AI}" value="${su.riders}"></label>
         <label>${t('setup.raceKm')}<select id="su-km">${opt([5, 10, 20, 30, 40] as const, su.raceKm as 5, (v) => `${v} km`)}</select></label>
         <p class="hint">${t('setup.raceHint')}</p>
         ${wind}
@@ -323,7 +324,7 @@ export class App {
         const lbl = el.parentElement!.firstChild!;
         lbl.textContent = id === 'su-pace'
           ? t('setup.pace', { p: el.value, w: Math.round((Number(el.value) / 100) * this.profile.ftp) })
-          : t(this.setup.mode === 'race' ? 'setup.rivals' : 'setup.riders', { n: el.value });
+          : t(this.setup.mode === 'race' ? 'setup.rivals' : 'setup.riders', { n: el.value, total: Number(el.value) + 1 });
       });
     };
     range('su-riders', (v) => ({ riders: v }));

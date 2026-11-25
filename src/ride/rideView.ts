@@ -111,6 +111,8 @@ export class RideView implements View {
   /** modèles allégés des coureurs IA, et lequel des deux modèles est affiché */
   private aiLow: RiderLow[] = [];
   private aiFull: boolean[] = [];
+  /** temps depuis le dernier changement de modèle, par coureur */
+  private aiSwitchT: number[] = [];
   /** portraits des coureurs IA (même ordre que peloton.riders) et du joueur */
   private aiPortraits: string[] = [];
   private playerPortrait = '';
@@ -293,10 +295,11 @@ export class RideView implements View {
       // version allégée, affichée quand le coureur est loin de la caméra
       const low = new RiderLow(r.look, m.pose);
       low.crankAngle = m.crankAngle;
-      low.root.visible = false;
+      m.root.visible = false;
       this.scene.add(low.root);
       this.aiLow.push(low);
-      this.aiFull.push(true);
+      this.aiFull.push(false);
+      this.aiSwitchT.push(1);
       this.aiLod.push(0);
       this.aiPortraits.push(this.cb.portrait?.(r.look) ?? '');
     }
@@ -628,27 +631,28 @@ export class RideView implements View {
     }
     if (this.peloton) {
       const cam = this.camera.position;
-      // Niveau de détail : seuls les coureurs les plus proches de la caméra (au plus
-      // q.fullRiders, et à moins de ~40 m) sont dessinés en détail ; les autres en version allégée.
+      // Niveau de détail : seuls les voisins immédiats du joueur au classement (juste devant et
+      // juste derrière) sont dessinés en détail ; dès qu'un coureur est à deux places ou plus,
+      // il passe en version allégée. Un changement ne se fait pas plus de 2 fois par seconde,
+      // pour éviter le clignotement quand deux coureurs se doublent sans arrêt.
       const riders = this.peloton.riders;
-      const camDist = riders.map((r, i) => {
-        this.placeModel(this.aiFull[i] ? this.aiModels[i] : this.aiLow[i], r.dist, r.lateral);
-        return (this.aiFull[i] ? this.aiModels[i] : this.aiLow[i]).root.position.distanceTo(cam);
-      });
-      const nearest = riders.map((_, i) => i).sort((a, b) => camDist[a] - camDist[b]);
-      const rank: number[] = [];
-      nearest.forEach((idx, k) => { rank[idx] = k; });
+      const ahead = riders.filter((r) => r.dist > this.dist).length;
+      const order = riders.map((_, i) => i).sort((a, b) => riders[b].dist - riders[a].dist);
+      const near = new Set<number>();
+      if (ahead > 0) near.add(order[ahead - 1]);
+      if (ahead < order.length) near.add(order[ahead]);
       riders.forEach((r, i) => {
         const m = this.aiModels[i], low = this.aiLow[i];
         // trop loin derrière (hors de l'historique du trajet libre) : on masque
         const shown = r.dist > this.dist - 700;
-        // hystérésis : on passe en détail sous 35 m, en allégé au-delà de 45 m
-        const wantFull = rank[i] < this.q.fullRiders && camDist[i] < (this.aiFull[i] ? 45 : 35);
-        if (wantFull !== this.aiFull[i]) {
+        this.aiSwitchT[i] += dt;
+        const wantFull = near.has(i);
+        if (wantFull !== this.aiFull[i] && this.aiSwitchT[i] > 0.5) {
           this.aiFull[i] = wantFull;
+          this.aiSwitchT[i] = 0;
           if (wantFull) m.crankAngle = low.crankAngle; else low.crankAngle = m.crankAngle;
-          this.placeModel(wantFull ? m : low, r.dist, r.lateral);
         }
+        this.placeModel(this.aiFull[i] ? m : low, r.dist, r.lateral);
         m.root.visible = shown && this.aiFull[i];
         low.root.visible = shown && !this.aiFull[i];
         if (!shown) return;
@@ -660,7 +664,7 @@ export class RideView implements View {
         }
         // au-delà de 25 m, les jambes ne sont recalculées qu'une image sur trois
         this.aiLod[i] += dt;
-        if (camDist[i] < 25 || this.aiLod[i] > 0.1) {
+        if (m.root.position.distanceTo(cam) < 25 || this.aiLod[i] > 0.1) {
           m.update(this.aiLod[i], moving ? cad : 0, r.dyn.v);
           this.aiLod[i] = 0;
         }

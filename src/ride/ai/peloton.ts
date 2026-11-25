@@ -23,8 +23,8 @@ import { teamById, type RiderKind } from '../../data/teams';
 
 export type AiKind = RiderKind;
 
-/** nombre maximal de coureurs IA (hors coéquipiers) */
-export const MAX_AI = 30;
+/** nombre maximal de coureurs IA : 30 coureurs au départ en comptant le joueur */
+export const MAX_AI = 29;
 export type AiState = 'pack' | 'pull' | 'attack' | 'break' | 'sprint' | 'finished';
 
 /** Ce que le peloton doit savoir de la route à une distance donnée. */
@@ -182,7 +182,7 @@ export class Peloton {
     opts: PelotonOptions = {},
   ) {
     this.rnd = rng(seed);
-    const n = Math.max(1, Math.min(MAX_AI, Math.round(setup.riders)));
+    const n = Math.max(1, Math.min(MAX_AI - (opts.roster ? 0 : Math.max(0, opts.teammates ?? 0)), Math.round(setup.riders)));
     const roster = opts.roster ?? buildRoster({
       seed, opponents: n, difficulty: setup.difficulty, playerFtp,
       playerTeam: opts.playerTeam ?? '', teammates: opts.teammates ?? 0,

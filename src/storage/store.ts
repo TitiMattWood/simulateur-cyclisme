@@ -13,10 +13,13 @@ import type { Lang } from '../i18n';
 import { defaultAppearance, type Appearance } from '../render/look';
 import { defaultSetup, type RideSetup } from '../ride/setup';
 import type { Difficulty } from '../ride/ai/roster';
+import { MAX_AI } from '../ride/ai/peloton';
 
 /** Ancien réglage « niveau » (fraction de la FTP du joueur) → difficulté par plage. */
 function migrateSetup(raw: Partial<RideSetup> & { level?: number }): Partial<RideSetup> {
   const { level, ...rest } = raw;
+  // 30 coureurs au plus au départ, joueur compris
+  if (typeof rest.riders === 'number') rest.riders = Math.max(1, Math.min(MAX_AI, rest.riders));
   if (rest.difficulty || typeof level !== 'number') return rest;
   const difficulty: Difficulty = level < 0.9 ? 'easy' : level > 1.05 ? 'strong' : 'equal';
   return { ...rest, difficulty };

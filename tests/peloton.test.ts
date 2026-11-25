@@ -71,12 +71,12 @@ describe('peloton', () => {
     expect([...times].sort((a, b) => a - b)).toEqual(times);
   });
 
-  it('à 30 coureurs, le groupe reste groupé et la course se termine', () => {
-    const g = ride({ mode: 'group', riders: 30, pace: 0.65, wait: false }, 0, 300);
-    expect(g.pel.riders).toHaveLength(30);
+  it('à 30 coureurs (29 IA + le joueur), le groupe reste groupé et la course se termine', () => {
+    const g = ride({ mode: 'group', riders: 40, pace: 0.65, wait: false }, 0, 300);
+    expect(g.pel.riders).toHaveLength(29);
     const ds = g.pel.riders.map((r) => r.dist);
     expect(Math.max(...ds) - Math.min(...ds)).toBeLessThan(60);
-    const { pel } = ride({ mode: 'race', riders: 30, difficulty: 'equal' }, 230, 900, 5000);
+    const { pel } = ride({ mode: 'race', riders: 29, difficulty: 'equal' }, 230, 900, 5000);
     expect(pel.riders.every((r) => r.finishTime !== null)).toBe(true);
   });
 
