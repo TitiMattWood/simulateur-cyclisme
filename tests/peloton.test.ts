@@ -64,7 +64,7 @@ describe('peloton', () => {
   });
 
   it('en course, tout le monde arrive et le classement est ordonné', () => {
-    const { pel, player } = ride({ mode: 'race', riders: 6, level: 1 }, 230, 900, 5000);
+    const { pel, player } = ride({ mode: 'race', riders: 6, difficulty: 'equal' }, 230, 900, 5000);
     expect(pel.riders.every((r) => r.finishTime !== null)).toBe(true);
     const rank = pel.ranking({ ...player, name: 'Moi', finishTime: null });
     const times = rank.filter((x) => x.finishTime !== null).map((x) => x.finishTime!);

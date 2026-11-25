@@ -18,8 +18,10 @@ import { draftFactor, apparentYaw, WAKE_DRIFT, type Neighbour } from '../../phys
 import type { RiderLook } from '../../render/look';
 import type { RideSetup } from '../setup';
 import { aiLook } from './looks';
+import { buildRoster, rng, shortName, type RiderRecord } from './roster';
+import { teamById, type RiderKind } from '../../data/teams';
 
-export type AiKind = 'climber' | 'rouleur' | 'sprinter';
+export type AiKind = RiderKind;
 export type AiState = 'pack' | 'pull' | 'attack' | 'break' | 'sprint' | 'finished';
 
 /** Ce que le peloton doit savoir de la route à une distance donnée. */
@@ -58,17 +60,30 @@ export interface PelotonEvent {
 }
 
 export interface RankEntry {
+  /** indice du coureur IA (dans Peloton.riders), null pour le joueur */
+  aiId: number | null;
   name: string;
   team: string;
+  /** couleur principale du maillot de l'équipe ('' = inconnue) */
+  teamColor: string;
   dist: number;
   isPlayer: boolean;
+  isTeammate: boolean;
+  /** réserve d'énergie (0 à 1), null pour le joueur */
+  energy: number | null;
   finishTime: number | null;
+  /** portrait (URL d'image), ajouté par l'affichage */
+  portrait?: string;
 }
 
-/** Générateur pseudo-aléatoire stable (mêmes courses pour une même graine). */
-function rng(seed: number): () => number {
-  let x = seed >>> 0;
-  return () => ((x = (x * 1664525 + 1013904223) >>> 0) / 4294967296);
+/** Options de création du peloton. */
+export interface PelotonOptions {
+  /** coureurs imposés (tour à étapes) ; sinon tirés au hasard selon la difficulté */
+  roster?: RiderRecord[];
+  /** équipe du joueur ('' = aucune) */
+  playerTeam?: string;
+  /** coéquipiers du joueur */
+  teammates?: number;
 }
 
 export class AiRider {
@@ -86,6 +101,8 @@ export class AiRider {
   finishTime: number | null = null;
   /** sprint pancarte : distance du panneau visé (le coureur sprinte jusqu'à le passer) */
   sprintTarget: number | null = null;
+  /** fiche du coureur (nom complet, équipe, fatigue), si elle existe */
+  readonly record: RiderRecord | null;
 
   constructor(
     readonly id: number,
@@ -95,15 +112,22 @@ export class AiRider {
     readonly ftp: number,
     readonly look: RiderLook,
     dist: number,
+    record: RiderRecord | null = null,
   ) {
+    this.record = record;
     this.params = buildParams({
       weightKg: look.weightKg, heightCm: look.heightCm, frame: look.frame, wheels: look.wheels,
       kit: { aeroHelmet: look.helmetType !== 'road', highSocks: look.sockHeight === 'high', overshoes: false },
     });
     this.dyn = new RiderDynamics(this.params);
     this.wPrime = kind === 'sprinter' ? 24000 : kind === 'climber' ? 16000 : 20000;
-    this.wBal = this.wPrime;
+    // un coureur fatigué par les étapes précédentes part avec une réserve entamée
+    this.wBal = this.wPrime * (1 - 2 * (record?.fatigue ?? 0));
     this.dist = dist;
+  }
+
+  get isTeammate(): boolean {
+    return !!this.record?.isTeammate;
   }
 
   /** Puissance maximale possible maintenant (sprint si la réserve le permet). */
@@ -152,28 +176,29 @@ export class Peloton {
     style: RiderLook['style'],
     startDist: number,
     seed = 42,
+    opts: PelotonOptions = {},
   ) {
     this.rnd = rng(seed);
     const n = Math.max(1, Math.min(10, Math.round(setup.riders)));
-    const kinds: AiKind[] = ['rouleur', 'climber', 'sprinter', 'rouleur', 'climber', 'rouleur', 'sprinter', 'climber', 'rouleur', 'rouleur'];
-    for (let i = 0; i < n; i++) {
-      const kind = kinds[i % kinds.length];
-      const { look, name, team } = aiLook(seed * 31 + i * 17 + 3, style);
+    const roster = opts.roster ?? buildRoster({
+      seed, opponents: n, difficulty: setup.difficulty, playerFtp,
+      playerTeam: opts.playerTeam ?? '', teammates: opts.teammates ?? 0,
+    });
+    roster.forEach((rec, i) => {
+      const kind = rec.kind;
+      const { look, team } = aiLook(rec.lookSeed, style, teamById(rec.teamId));
       // les grimpeurs sont plus légers
       if (kind === 'climber') look.weightKg = Math.min(look.weightKg, 62 + Math.round(this.rnd() * 4));
       if (kind === 'sprinter') look.weightKg = Math.max(look.weightKg, 74);
-      let ftp: number;
-      if (setup.mode === 'race') {
-        const kf = kind === 'rouleur' ? 1.04 : kind === 'climber' ? 0.97 : 0.95;
-        ftp = setup.level * playerFtp * kf * (0.95 + this.rnd() * 0.1);
-      } else {
+      const ftp = setup.mode === 'race'
+        // la FTP vient de la difficulté choisie, diminuée par la fatigue des étapes précédentes
+        ? rec.baseFtp * (1 - rec.fatigue)
         // en groupe, les IA doivent pouvoir tenir l'allure et revenir sur le joueur
-        ftp = playerFtp * Math.max(1.2, setup.pace * 1.7);
-      }
+        : playerFtp * Math.max(1.2, setup.pace * 1.7);
       // départ en formation devant le joueur
       const d = startDist + 2 + i * 1.15;
-      this.riders.push(new AiRider(i, name, team, kind, Math.round(ftp), look, d));
-    }
+      this.riders.push(new AiRider(i, shortName(rec), team.name, kind, Math.round(ftp), look, d, rec));
+    });
     // le premier de l'ordre est le plus en avant
     this.order = this.riders.map((_, i) => i).sort((a, b) => this.riders[b].dist - this.riders[a].dist);
     this.relayPeriod = 45 + this.rnd() * 45;
@@ -461,9 +486,15 @@ export class Peloton {
   }
 
   /** Classement en direct (les arrivés d'abord, par temps ; puis par distance). */
-  ranking(player: PlayerState & { name: string; finishTime: number | null }): RankEntry[] {
-    const all: RankEntry[] = this.riders.map((r) => ({ name: r.name, team: r.team, dist: r.dist, isPlayer: false, finishTime: r.finishTime }));
-    all.push({ name: player.name, team: '', dist: player.dist, isPlayer: true, finishTime: player.finishTime });
+  ranking(player: PlayerState & { name: string; finishTime: number | null; team?: string; teamColor?: string }): RankEntry[] {
+    const all: RankEntry[] = this.riders.map((r) => ({
+      aiId: r.id, name: r.name, team: r.team, teamColor: r.look.jerseyColor, dist: r.dist, isPlayer: false,
+      isTeammate: r.isTeammate, energy: r.energy, finishTime: r.finishTime,
+    }));
+    all.push({
+      aiId: null, name: player.name, team: player.team ?? '', teamColor: player.teamColor ?? '', dist: player.dist,
+      isPlayer: true, isTeammate: false, energy: null, finishTime: player.finishTime,
+    });
     return all.sort((a, b) => {
       if (a.finishTime !== null && b.finishTime !== null) return a.finishTime - b.finishTime;
       if (a.finishTime !== null) return -1;

@@ -1,6 +1,7 @@
 /**
  * Affichage spécifique aux sorties en groupe et aux courses : barre d'aspiration,
- * mini-classement avec les écarts, annonces (attaque, échappée, sprint…).
+ * mini-classement avec les écarts (portrait, couleur d'équipe et jauge d'énergie de chaque
+ * coureur IA), annonces (attaque, échappée, sprint…).
  */
 import { t, type I18nKey } from '../i18n';
 import { escapeHtml, fmtKm, fmtNum } from './format';
@@ -91,7 +92,10 @@ export class RaceHud {
     this.board.innerHTML = `
       <div class="board-head">${head}</div>
       <ol start="${from + 1}">${rows.map((r) => `
-        <li class="${r.isPlayer ? 'me' : ''}"><span class="nm">${escapeHtml(r.name)}</span><span class="gp">${r.finishTime !== null ? '🏁' : gapText(r)}</span></li>`).join('')}
+        <li class="${r.isPlayer ? 'me' : r.isTeammate ? 'mate' : ''}" title="${escapeHtml(r.team)}">
+          <span class="pic" style="--tc:${escapeHtml(r.teamColor || '#888')}">${r.portrait ? `<img src="${r.portrait}" alt="">` : ''}</span>
+          <span class="nm"><span class="tx">${escapeHtml(r.name)}</span>${r.energy !== null ? `<i class="en ${r.energy < 0.25 ? 'low' : r.energy < 0.55 ? 'mid' : ''}" style="--e:${Math.round(r.energy * 100)}%"></i>` : ''}</span>
+          <span class="gp">${r.finishTime !== null ? '🏁' : gapText(r)}</span></li>`).join('')}
       </ol>`;
   }
 

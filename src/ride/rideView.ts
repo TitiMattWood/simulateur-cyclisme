@@ -12,11 +12,12 @@ import type { View } from '../render/engine';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RiderModel } from '../render/riderModel';
 import { aiLook } from './ai/looks';
+import { teamById } from '../data/teams';
 import { Peloton, type RankEntry, type PelotonEnv } from './ai/peloton';
 import { defaultSetup, WIND_SPEED, type RideSetup } from './setup';
 import { RaceHud } from '../ui/raceHud';
 import { SignSprints, SPRINT_DISTANCE, SPRINT_XP } from './signSprint';
-import { lookFromProfile } from '../render/look';
+import { lookFromProfile, type RiderLook } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
 import type { Track } from '../geo/track';
@@ -47,6 +48,8 @@ export interface RideCallbacks {
   onPauseMenu(): void;
   /** ranking : classement final (course ou groupe), vide en sortie libre */
   onFinish(summary: RideSummary, samples: Sample[], ranking: RankEntry[]): void;
+  /** portrait (« photo de profil ») d'un coureur, rendu depuis son modèle 3D */
+  portrait?(look: RiderLook): string;
 }
 
 /** Tracé provisoire du trajet libre : le point de départ, le temps de charger les routes. */
@@ -104,6 +107,9 @@ export class RideView implements View {
   private peloton: Peloton | null = null;
   private aiModels: RiderModel[] = [];
   private aiLod: number[] = [];
+  /** portraits des coureurs IA (même ordre que peloton.riders) et du joueur */
+  private aiPortraits: string[] = [];
+  private playerPortrait = '';
   private raceHud: RaceHud | null = null;
   private pelEnv: PelotonEnv | null = null;
   /** vent dans le repère du monde (m/s, direction vers laquelle il souffle) */
@@ -273,7 +279,7 @@ export class RideView implements View {
     if (su.mode === 'free') return;
     if (su.mode === 'race') this.raceFinish = this.track.open ? this.dist + su.raceKm * 1000 : this.track.length;
     const p = this.profile;
-    this.peloton = new Peloton(su, p.ftp, p.appearance.style, this.dist, Math.floor(Math.random() * 1e6));
+    this.peloton = new Peloton(su, p.ftp, p.appearance.style, this.dist, Math.floor(Math.random() * 1e6), { playerTeam: p.teamId });
     for (const r of this.peloton.riders) {
       const m = new RiderModel(r.look);
       m.setBlobShadow(!this.q.rideShadows);
@@ -281,7 +287,9 @@ export class RideView implements View {
       this.scene.add(m.root);
       this.aiModels.push(m);
       this.aiLod.push(0);
+      this.aiPortraits.push(this.cb.portrait?.(r.look) ?? '');
     }
+    this.playerPortrait = this.cb.portrait?.(lookFromProfile(p)) ?? '';
     this.pelEnv = {
       road: (d) => {
         const s = this.track.sampleAt(d, this.sample2);
@@ -394,7 +402,11 @@ export class RideView implements View {
   /** Classement en direct (vide en sortie libre). */
   private ranking(): RankEntry[] {
     if (!this.peloton) return [];
-    return this.peloton.ranking({ dist: this.dist, v: this.dyn.v, lateral: this.playerLateral, name: this.profile.name || t('rep.you'), finishTime: this.finishTime });
+    const team = teamById(this.profile.teamId);
+    return this.peloton.ranking({
+      dist: this.dist, v: this.dyn.v, lateral: this.playerLateral, name: this.profile.name || t('rep.you'),
+      finishTime: this.finishTime, team: team?.name ?? '', teamColor: this.profile.jerseyColor,
+    }).map((e) => ({ ...e, portrait: e.aiId === null ? this.playerPortrait : this.aiPortraits[e.aiId] ?? '' }));
   }
 
   /** Parcours GPX : reconnaît le revêtement (bitume, gravier, terre) d'après les routes BD TOPO voisines. */
