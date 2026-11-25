@@ -635,6 +635,8 @@ export class RideView implements View {
       // juste derrière) sont dessinés en détail ; dès qu'un coureur est à deux places ou plus,
       // il passe en version allégée. Un changement ne se fait pas plus de 2 fois par seconde,
       // pour éviter le clignotement quand deux coureurs se doublent sans arrêt.
+      // Exception : un coureur à moins de 6 m de la caméra (premier plan, caméra de poursuite)
+      // reste détaillé, sinon la version allégée se verrait (hystérésis : il repasse en allégé à 8 m).
       const riders = this.peloton.riders;
       const ahead = riders.filter((r) => r.dist > this.dist).length;
       const order = riders.map((_, i) => i).sort((a, b) => riders[b].dist - riders[a].dist);
@@ -646,7 +648,8 @@ export class RideView implements View {
         // trop loin derrière (hors de l'historique du trajet libre) : on masque
         const shown = r.dist > this.dist - 700;
         this.aiSwitchT[i] += dt;
-        const wantFull = near.has(i);
+        const camD = (this.aiFull[i] ? m : low).root.position.distanceTo(cam);
+        const wantFull = near.has(i) || camD < (this.aiFull[i] ? 8 : 6);
         if (wantFull !== this.aiFull[i] && this.aiSwitchT[i] > 0.5) {
           this.aiFull[i] = wantFull;
           this.aiSwitchT[i] = 0;
