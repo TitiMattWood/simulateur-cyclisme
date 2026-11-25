@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import type { View } from '../render/engine';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { RiderLow } from '../render/riderLow';
 import { RiderModel } from '../render/riderModel';
 import { aiLook } from './ai/looks';
 import { teamById } from '../data/teams';
@@ -107,6 +108,9 @@ export class RideView implements View {
   private peloton: Peloton | null = null;
   private aiModels: RiderModel[] = [];
   private aiLod: number[] = [];
+  /** modèles allégés des coureurs IA, et lequel des deux modèles est affiché */
+  private aiLow: RiderLow[] = [];
+  private aiFull: boolean[] = [];
   /** portraits des coureurs IA (même ordre que peloton.riders) et du joueur */
   private aiPortraits: string[] = [];
   private playerPortrait = '';
@@ -286,6 +290,13 @@ export class RideView implements View {
       m.crankAngle = r.id * 1.3;
       this.scene.add(m.root);
       this.aiModels.push(m);
+      // version allégée, affichée quand le coureur est loin de la caméra
+      const low = new RiderLow(r.look, m.pose);
+      low.crankAngle = m.crankAngle;
+      low.root.visible = false;
+      this.scene.add(low.root);
+      this.aiLow.push(low);
+      this.aiFull.push(true);
       this.aiLod.push(0);
       this.aiPortraits.push(this.cb.portrait?.(r.look) ?? '');
     }
@@ -522,7 +533,7 @@ export class RideView implements View {
    * Pose un avatar sur la route à la distance d. lateral : décalage en mètres vers la gauche
    * (+) ou la droite (−) par rapport à la file normale (droite de la chaussée).
    */
-  private placeModel(model: RiderModel, d: number, lateral: number): void {
+  private placeModel(model: { root: THREE.Object3D; setGrade(g: number): void }, d: number, lateral: number): void {
     const s = this.track.sampleAt(d, this.sample2);
     // on roule à droite de la chaussée (près de l'axe sur un sentier étroit)
     const width = this.path ? this.path.edgeAt(d).width : 6;
@@ -617,18 +628,39 @@ export class RideView implements View {
     }
     if (this.peloton) {
       const cam = this.camera.position;
-      this.peloton.riders.forEach((r, i) => {
-        const m = this.aiModels[i];
+      // Niveau de détail : seuls les coureurs les plus proches de la caméra (au plus
+      // q.fullRiders, et à moins de ~40 m) sont dessinés en détail ; les autres en version allégée.
+      const riders = this.peloton.riders;
+      const camDist = riders.map((r, i) => {
+        this.placeModel(this.aiFull[i] ? this.aiModels[i] : this.aiLow[i], r.dist, r.lateral);
+        return (this.aiFull[i] ? this.aiModels[i] : this.aiLow[i]).root.position.distanceTo(cam);
+      });
+      const nearest = riders.map((_, i) => i).sort((a, b) => camDist[a] - camDist[b]);
+      const rank: number[] = [];
+      nearest.forEach((idx, k) => { rank[idx] = k; });
+      riders.forEach((r, i) => {
+        const m = this.aiModels[i], low = this.aiLow[i];
         // trop loin derrière (hors de l'historique du trajet libre) : on masque
-        m.root.visible = r.dist > this.dist - 700;
-        if (!m.root.visible) return;
-        this.placeModel(m, r.dist, r.lateral);
+        const shown = r.dist > this.dist - 700;
+        // hystérésis : on passe en détail sous 35 m, en allégé au-delà de 45 m
+        const wantFull = rank[i] < this.q.fullRiders && camDist[i] < (this.aiFull[i] ? 45 : 35);
+        if (wantFull !== this.aiFull[i]) {
+          this.aiFull[i] = wantFull;
+          if (wantFull) m.crankAngle = low.crankAngle; else low.crankAngle = m.crankAngle;
+          this.placeModel(wantFull ? m : low, r.dist, r.lateral);
+        }
+        m.root.visible = shown && this.aiFull[i];
+        low.root.visible = shown && !this.aiFull[i];
+        if (!shown) return;
         // cadence : plus élevée quand la puissance monte, roue libre à faible puissance
         const cad = r.power < 25 ? 0 : 78 + Math.min(25, (r.power / r.ftp) * 14);
-        // au-delà de 45 m, les jambes ne sont recalculées qu'une image sur trois
+        if (!this.aiFull[i]) {
+          low.update(dt, moving ? cad : 0);
+          return;
+        }
+        // au-delà de 25 m, les jambes ne sont recalculées qu'une image sur trois
         this.aiLod[i] += dt;
-        const far = m.root.position.distanceTo(cam) > 45;
-        if (!far || this.aiLod[i] > 0.1) {
+        if (camDist[i] < 25 || this.aiLod[i] > 0.1) {
           m.update(this.aiLod[i], moving ? cad : 0, r.dyn.v);
           this.aiLod[i] = 0;
         }
@@ -728,6 +760,6 @@ export class RideView implements View {
     this.landmarks.dispose();
     this.rider.dispose();
     this.raceHud?.dispose();
-    for (const m of [...this.aiModels, ...this.preview.map((p) => p.model)]) m.dispose();
+    for (const m of [...this.aiModels, ...this.aiLow, ...this.preview.map((p) => p.model)]) m.dispose();
   }
 }

@@ -42,11 +42,13 @@ export interface QualityPreset {
   post: 0 | 1 | 2;
   /** ombres portées en sortie (soleil qui suit le cycliste) */
   rideShadows: boolean;
+  /** nombre maximal de coureurs IA dessinés en détail (les autres, plus loin, en version allégée) */
+  fullRiders: number;
 }
 
 export const QUALITY: Record<'low' | 'medium' | 'high', QualityPreset> = {
-  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, orthoPx: 48, pixelRatio: 1, antialias: false, post: 0, rideShadows: false },
-  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, orthoPx: 64, pixelRatio: 1.25, antialias: true, post: 1, rideShadows: true },
-  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, orthoPx: 96, pixelRatio: 2, antialias: true, post: 2, rideShadows: true },
+  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, orthoPx: 48, pixelRatio: 1, antialias: false, post: 0, rideShadows: false, fullRiders: 6 },
+  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, orthoPx: 64, pixelRatio: 1.25, antialias: true, post: 1, rideShadows: true, fullRiders: 8 },
+  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, orthoPx: 96, pixelRatio: 2, antialias: true, post: 2, rideShadows: true, fullRiders: 12 },
 };
 export type QualityLevel = keyof typeof QUALITY;
