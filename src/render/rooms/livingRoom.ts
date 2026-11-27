@@ -47,20 +47,21 @@ export function livingRoom(neon: NeonSetting = { color: '#ffb36b', on: true }): 
 
   // ----- Canapé contre le mur arrière, fauteuil, table basse
   const fabric = std('#7d8a96', 0.95);
-  box(g, fabric, -3.05, 0.25, 1.2, 0.85, 0.42, 2.4); // assise
-  box(g, fabric, -3.35, 0.65, 1.2, 0.25, 0.6, 2.4); // dossier
-  for (const z of [0.05, 2.35]) box(g, fabric, -3.05, 0.4, z, 0.85, 0.5, 0.2); // accoudoirs
-  for (const z of [0.6, 1.8]) box(g, std('#e3c567', 0.95), -3.2, 0.62, z, 0.15, 0.35, 0.4); // coussins
-  box(g, std('#b9b0a2', 0.95), -2.2, 0.01, 1.2, 1.8, 0.02, 2.4, false); // tapis
-  box(g, oak, -2.25, 0.38, 1.2, 0.6, 0.04, 1.0);
-  for (const z of [0.78, 1.62]) for (const x of [-2.5, -2.0]) box(g, std('#222', 0.4, 0.5), x, 0.18, z, 0.03, 0.36, 0.03);
+  // (décalés vers la caméra : la gauche du mur arrière accueille le garage à vélos)
+  box(g, fabric, -3.05, 0.25, 2.75, 0.85, 0.42, 2.4); // assise
+  box(g, fabric, -3.35, 0.65, 2.75, 0.25, 0.6, 2.4); // dossier
+  for (const z of [1.6, 3.9]) box(g, fabric, -3.05, 0.4, z, 0.85, 0.5, 0.2); // accoudoirs
+  for (const z of [2.15, 3.35]) box(g, std('#e3c567', 0.95), -3.2, 0.62, z, 0.15, 0.35, 0.4); // coussins
+  box(g, std('#b9b0a2', 0.95), -2.2, 0.01, 2.75, 1.8, 0.02, 2.4, false); // tapis
+  box(g, oak, -2.25, 0.38, 2.75, 0.6, 0.04, 1.0);
+  for (const z of [2.33, 3.17]) for (const x of [-2.5, -2.0]) box(g, std('#222', 0.4, 0.5), x, 0.18, z, 0.03, 0.36, 0.03);
 
   // ----- Plantes près de la baie, lampadaire
-  plant(g, -2.7, -2.4, 1.4, '#e8e2d8', 3);
+  plant(g, -1.2, -2.5, 1.4, '#e8e2d8', 3);
   plant(g, 0.9, -2.5, 1.1, '#cf8c5e', 6);
   plant(g, 2.7, -2.5, 0.9, '#f2efe9', 8);
-  cyl(g, std('#222', 0.4, 0.6), -3.1, 0.85, -0.6, 0.015, 0.015, 1.7, 8);
-  const lampShade = cyl(g, std('#f2eadb', 0.9, 0, { emissive: '#ffdcae', emissiveIntensity: 0.6 }), -3.1, 1.78, -0.6, 0.18, 0.24, 0.3, 24);
+  cyl(g, std('#222', 0.4, 0.6), -3.1, 0.85, 1.4, 0.015, 0.015, 1.7, 8);
+  const lampShade = cyl(g, std('#f2eadb', 0.9, 0, { emissive: '#ffdcae', emissiveIntensity: 0.6 }), -3.1, 1.78, 1.4, 0.18, 0.24, 0.3, 24);
   lampShade.castShadow = false;
 
   // ----- Tapis du home trainer et ventilateur

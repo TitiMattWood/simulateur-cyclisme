@@ -20,6 +20,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); c
 #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #ui { position: fixed; inset: 0; pointer-events: none; }
 #ui > * { pointer-events: auto; }
+/* l'accueil couvre tout l'écran : il doit laisser passer souris et trackpad vers la scène 3D (rotation de la caméra) */
+#ui > .home { pointer-events: none; }
 button, input, select { font: inherit; color: inherit; }
 button { background: #2a313a; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
 button:hover { background: #343c46; }
@@ -325,3 +327,10 @@ button.go:disabled { background: #3a4048; box-shadow: none; }
 .team-pick { display: flex; align-items: center; gap: 12px; }
 .team-pick label { flex: 1; }
 .portrait { width: 64px; height: 64px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px rgba(255,255,255,.25); background: #1b2230; }
+
+/* Fiche des roues (profil) : caractéristiques et gains marginaux de l'association avec le cadre */
+.wheel-info { margin: -4px 0 8px; font-size: 12px; opacity: 0.9; }
+.wheel-info ul { margin: 4px 0 0; padding-left: 18px; }
+.wheel-info li { margin: 2px 0; }
+.wheel-info li.pos { color: #4ade80; }
+.wheel-info li.neg { color: #fbbf24; }

@@ -1,6 +1,6 @@
 /**
  * Loft industriel : mur de briques, poutres métalliques, verrière d'atelier, sol en béton,
- * ampoules à filament et enseigne néon « MyHomeRide ».
+ * ampoules à filament et enseigne néon « HomeRide ».
  */
 import * as THREE from 'three';
 import {
@@ -61,7 +61,7 @@ export function industrialLoft(neon: NeonSetting = { color: '#ff4fa8', on: true 
   // ----- Enseigne néon sur les briques
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), new THREE.MeshBasicMaterial({
     // éteinte : le tube reste visible, gris et sans éclat
-    map: neonSign('MyHomeRide', neon.on ? neon.color : '#6b6b6b'), transparent: true, toneMapped: false,
+    map: neonSign('HomeRide', neon.on ? neon.color : '#6b6b6b'), transparent: true, toneMapped: false,
     color: neon.on ? new THREE.Color(1.5, 1.5, 1.5) : new THREE.Color(0.35, 0.35, 0.35),
   }));
   sign.position.set(0.6, 2.3, -2.98);
@@ -77,7 +77,7 @@ export function industrialLoft(neon: NeonSetting = { color: '#ff4fa8', on: true 
   box(g, leather, -3.15, 0.65, 2.2, 0.2, 0.6, 0.8);
   for (const z of [1.85, 2.55]) box(g, leather, -2.85, 0.45, z, 0.8, 0.3, 0.12);
   plant(g, 1.6, -2.55, 1.2, '#2f3134', 11);
-  plant(g, -3.0, 0.9, 0.9, '#2f3134', 14);
+  plant(g, -3.0, 3.4, 0.9, '#2f3134', 14);
 
   // ----- TV sur console en acier et bois
   box(g, wood, 3.05, 0.55, 0, 0.45, 0.05, 2.0);

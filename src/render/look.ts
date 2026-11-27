@@ -9,10 +9,12 @@
  */
 import type { FrameId, WheelId } from '../physics/equipment';
 
-export type JerseyPattern = 'solid' | 'hoops' | 'diagonal' | 'chest' | 'shoulders' | 'checker' | 'polka' | 'gradient';
+export type JerseyPattern = 'solid' | 'hoops' | 'diagonal' | 'chest' | 'shoulders' | 'checker' | 'polka' | 'gradient' | 'band' | 'split';
 export type HairStyle = 'short' | 'long' | 'ponytail' | 'bald';
 export type Beard = 'none' | 'stubble' | 'full';
 export type HelmetType = 'road' | 'aero' | 'tt';
+/** modèles de lunettes de sport (esprit des grands écrans de course, sans marque) */
+export type GlassesModel = 'shield' | 'halfrim' | 'wrap';
 export type LensColor = 'dark' | 'blue' | 'red' | 'orange' | 'clear';
 export type SockHeight = 'low' | 'mid' | 'high';
 export type Gloves = 'none' | 'mitts' | 'full';
@@ -21,7 +23,8 @@ export type Groupset = 'black' | 'silver';
 export type TireWall = 'black' | 'tan' | 'blue' | 'red' | 'white' | 'yellow' | 'green';
 export type AvatarStyle = 'smooth' | 'facet';
 export type RoomId = 'neon' | 'workshop' | 'living' | 'loft';
-export type Finish = 'gloss' | 'matte';
+/** finition du cadre ; « photo » = la photo de profil du vélo plaquée sur le cadre (en local) */
+export type Finish = 'gloss' | 'matte' | 'photo';
 
 export interface Appearance {
   /** style de modélisation de l'avatar et du vélo */
@@ -46,6 +49,10 @@ export interface Appearance {
   helmetType: HelmetType;
   glasses: boolean;
   lens: LensColor;
+  /** modèle de lunettes : écran d'un seul tenant, demi-cerclage, enveloppant fin */
+  glassesModel?: GlassesModel;
+  /** couleur de la monture */
+  glassesFrame?: string;
   shoeColor: string;
   sockColor: string;
   sockHeight: SockHeight;
@@ -65,6 +72,30 @@ export interface Appearance {
   computer: boolean;
   /** serviette sur le cintre (visible seulement sur le home trainer de l'accueil) */
   towel: boolean;
+  /** coloris propre à chaque vélo du garage (chaque vélo garde sa couleur quand on change de vélo) */
+  paints?: Partial<Record<FrameId, BikePaint>>;
+}
+
+/** Coloris d'un vélo. */
+export interface BikePaint {
+  frameColor: string;
+  frameColor2: string;
+  finish: Finish;
+  tireWall: TireWall;
+}
+
+/** Coloris d'origine des vélos (d'après les photos de référence). */
+export const DEFAULT_PAINTS: Record<FrameId, BikePaint> = {
+  climb: { frameColor: '#eef0f0', frameColor2: '#2a2c30', finish: 'photo', tireWall: 'tan' },
+  aero: { frameColor: '#6d6e6b', frameColor2: '#b9b5a8', finish: 'photo', tireWall: 'black' },
+  gravel: { frameColor: '#b0121d', frameColor2: '#f2f2f2', finish: 'photo', tireWall: 'tan' },
+  tt: { frameColor: '#e9e7ee', frameColor2: '#1c1d20', finish: 'photo', tireWall: 'black' },
+  mtb: { frameColor: '#22313f', frameColor2: '#e94b2b', finish: 'matte', tireWall: 'black' },
+};
+
+/** Coloris d'un vélo : celui choisi au profil pour ce vélo, sinon celui d'origine. */
+export function paintFor(a: Pick<Appearance, 'paints'>, frame: FrameId): BikePaint {
+  return a.paints?.[frame] ?? DEFAULT_PAINTS[frame];
 }
 
 /** Teints proposés, du plus clair au plus foncé. */
@@ -102,6 +133,8 @@ export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
     helmetType: 'road',
     glasses: true,
     lens: 'dark',
+    glassesModel: 'shield',
+    glassesFrame: '#f2f2f2',
     shoeColor: '#f2f2f2',
     sockColor: '#f4f4f4',
     sockHeight: 'high',

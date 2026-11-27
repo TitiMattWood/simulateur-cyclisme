@@ -16,7 +16,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WHEELS, type FrameId } from '../physics/equipment';
-import { LENS, type RiderLook } from './look';
+import { OUTLINES, type FrameOutline, type Pt } from './frameOutlines';
+import { type GlassesModel, LENS, type RiderLook } from './look';
 
 export type { RiderLook } from './look';
 
@@ -87,6 +88,48 @@ function stretchBack<T extends THREE.BufferGeometry>(g: T, k: number): T {
   return g;
 }
 
+/**
+ * Formes des verres de lunettes de sport, sur un cylindre de rayon 1 centré vers +X
+ * (a = angle depuis l'avant, ±1,25 aux tempes ; u = |a| / 1,25). Hauteur de −0,5 à +0,5.
+ *  - écran : grand verre d'un seul tenant, sourcil presque droit, encoche du nez étroite ;
+ *  - demi-cerclage : bas des verres libre et arrondi sous chaque œil, pont de nez marqué ;
+ *  - enveloppant fin : bande plus basse, verres en amande.
+ */
+const LENS_SHAPES: Record<GlassesModel, { top: (a: number, u: number) => number; bottom: (a: number, u: number) => number }> = {
+  shield: {
+    top: (_a, u) => 0.5 - 0.06 * u * u,
+    bottom: (a, u) => -0.5 + 0.3 * Math.exp(-(a * a) / 0.012) + 0.22 * Math.pow(u, 3),
+  },
+  halfrim: {
+    top: (_a, u) => 0.5 - 0.14 * u * u,
+    bottom: (a, u) => -0.5 + 0.48 * Math.exp(-(a * a) / 0.018) + 0.08 * Math.sin(Math.min(1, u * 1.6) * Math.PI) + 0.32 * Math.pow(u, 2.5),
+  },
+  wrap: {
+    top: (_a, u) => 0.5 - 0.18 * u * u,
+    bottom: (a, u) => -0.5 + 0.42 * Math.exp(-(a * a) / 0.02) + 0.35 * Math.pow(u, 3),
+  },
+};
+
+/** Verre : portion de cylindre découpée selon le modèle, bombée verticalement comme un écran. */
+function lensGeometry(model: GlassesModel): THREE.BufferGeometry {
+  const shape = LENS_SHAPES[model];
+  const g = new THREE.CylinderGeometry(1, 1, 1, 48, 6, true, Math.PI / 2 - 1.25, 2.5);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const a = Math.atan2(z, x), u = Math.abs(a) / 1.25;
+    const top = shape.top(a, u), bottom = shape.bottom(a, u);
+    const t = y + 0.5;
+    const yy = bottom + (top - bottom) * t;
+    // bombé vertical : le milieu du verre avance un peu (verre « torique » des lunettes de sport)
+    const bulge = 1 + 0.06 * (1 - (2 * t - 1) * (2 * t - 1));
+    pos.setXYZ(i, x * bulge, yy, z * bulge);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+
 const G = {
   /** demi-sphère (calotte) pour les casques */
   dome: keep(new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2)),
@@ -104,7 +147,9 @@ const G = {
   /** molette de serrage */
   dial: keep(new THREE.CylinderGeometry(1, 1, 1, 16)),
   /** verre de lunettes enveloppant (portion de cylindre ouvert, centré vers +X) */
-  lens: keep(new THREE.CylinderGeometry(1, 1, 1, 20, 1, true, Math.PI / 2 - 1.25, 2.5)),
+  lensShield: keep(lensGeometry('shield')),
+  lensHalfrim: keep(lensGeometry('halfrim')),
+  lensWrap: keep(lensGeometry('wrap')),
 };
 
 /**
@@ -218,7 +263,7 @@ const UNITS = {
 let FACET = false;
 /** nombre de segments selon le style (finesse en arrondi, sobriété en facettes) */
 const seg = (smooth: number, facet: number) => (FACET ? facet : smooth);
-/** Supports du décor « MyHomeRide » posé sur les deux flancs du tube diagonal. */
+/** Supports du décor « HomeRide » posé sur les deux flancs du tube diagonal. */
 const DECAL_R = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).translate(0.15, 0.52, 1.03));
 const DECAL_L = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).rotateX(Math.PI).translate(0.15, 0.52, -1.03));
 
@@ -294,8 +339,12 @@ interface FrameGeo {
   deep: number;
   /** hauteur où les haubans rejoignent le tube de selle (fraction, haubans plongeants) */
   stayAt: number;
-  /** silhouette particulière : 'foil' (aéro façon Scott Foil RC), 'rcrg' (gravel façon Van Rysel RCR-G) */
-  shape?: 'foil' | 'rcrg';
+  /**
+   * silhouette particulière : 'foil' (aéro façon Scott Foil RC), 'rcrg' (gravel façon Van Rysel
+   * RCR-G), 'crux' (gravel léger à tubes ronds façon Specialized Crux), 'speedmax' (CLM massif
+   * façon Canyon Speedmax / Scott Plasma), 'evo' (route façon Cannondale SuperSix EVO)
+   */
+  shape?: 'foil' | 'rcrg' | 'crux' | 'speedmax' | 'evo';
   /** angle du buste au-dessus de l'horizontale (degrés) */
   torso: number;
   hands: Hands;
@@ -311,13 +360,13 @@ interface FrameGeo {
 
 const GEO: Record<FrameId, FrameGeo> = {
   // Route « grimpeur » (esprit Scott Addict RC) : tubes fins à profil tronqué, haubans plongeants.
-  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.26, 0.78], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.7, torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
+  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.27, 0.765], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.6, shape: 'evo', torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
   // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas, avant plus bas.
   aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.285, 0.735], headTop: [0.85, 0.8], headBot: [0.899, 0.615], tube: 0.0135, deep: 2.6, stayAt: 0.42, shape: 'foil', torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
   // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé, avant plus haut.
-  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.3, 0.7], headTop: [0.882, 0.8], headBot: [0.922, 0.655], tube: 0.0165, deep: 1.6, stayAt: 0.5, shape: 'rcrg', torso: 45, hands: 'flare', stemLen: 0.095, stemAngle: -8, spacer: 0.012, saddleFwd: 0, suspension: false },
+  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.31, 0.73], headTop: [0.882, 0.81], headBot: [0.922, 0.655], tube: 0.0155, deep: 1.1, stayAt: 0.93, shape: 'crux', torso: 45, hands: 'flare', stemLen: 0.095, stemAngle: -8, spacer: 0.012, saddleFwd: 0, suspension: false },
   // Contre-la-montre (esprit Scott Plasma) : avant massif et intégré, prolongateurs.
-  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
+  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.42, shape: 'speedmax', torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
   // VTT tout-suspendu 29" (esprit Scott Spark) : direction très couchée (65,5°), fourche longue,
   // tube horizontal plongeant, potence courte, cintre large relevé, amortisseur sous le tube horizontal.
   mtb: { R: 0.37, tire: 0.029, wheelbase: 1.18, bb: [0.44, 0.34], seatTop: [0.33, 0.75], headTop: [0.954, 0.97], headBot: [1.0, 0.87], tube: 0.021, deep: 1.35, stayAt: 0.74, torso: 50, hands: 'flat', stemLen: 0.05, stemAngle: 0, spacer: 0.02, saddleFwd: 0, suspension: true },
@@ -404,6 +453,28 @@ function jerseyTexture(look: RiderLook): THREE.CanvasTexture {
         }
       }
       break;
+    case 'band':
+      // haut du maillot en couleur 1, bas en couleur 2, liseré de couleur 3 (maillots « deux tons »)
+      g.fillStyle = c2;
+      g.fillRect(0, 150, 256, 106);
+      g.fillStyle = c3;
+      g.fillRect(0, 144, 256, 8);
+      break;
+    case 'split':
+      // coupe en biais : épaule gauche en couleur 1, flanc droit en couleur 2, liseré de couleur 3
+      for (const off of [0, 128]) {
+        g.fillStyle = c2;
+        g.beginPath();
+        g.moveTo(off + 128, 20); g.lineTo(off + 128, 256); g.lineTo(off - 10, 256);
+        g.closePath();
+        g.fill();
+        g.strokeStyle = c3;
+        g.lineWidth = 6;
+        g.beginPath();
+        g.moveTo(off + 128, 20); g.lineTo(off - 10, 256);
+        g.stroke();
+      }
+      break;
     case 'gradient': {
       const grad = g.createLinearGradient(0, 0, 0, 256);
       grad.addColorStop(0, c2);
@@ -431,14 +502,14 @@ function jerseyTexture(look: RiderLook): THREE.CanvasTexture {
   return toTexture(c);
 }
 
-/** Inscription « MyHomeRide » du tube diagonal (fond transparent). */
+/** Inscription « HomeRide » du tube diagonal (fond transparent). */
 function wordmarkTexture(color: string): THREE.CanvasTexture {
   const [c, g] = canvas(512, 128);
   g.fillStyle = color;
   g.font = 'italic 800 78px system-ui, "Segoe UI", sans-serif';
   g.textBaseline = 'middle';
   g.textAlign = 'center';
-  g.fillText('MyHomeRide', 256, 66);
+  g.fillText('HomeRide', 256, 66);
   // petit trait de soulignement dynamique
   g.fillRect(70, 108, 372, 6);
   return toTexture(c);
@@ -479,13 +550,19 @@ class LimbPath {
   private p2 = new THREE.Vector3();
   private tmp = new THREE.Vector3();
 
-  set(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): this {
+  /**
+   * blendR : rayon approximatif du membre à l'articulation. L'arrondi doit être plus large que
+   * l'épaisseur du membre, sinon l'intérieur du pli s'écrase en angle (genou, coude « cassés »).
+   */
+  set(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, blendR = 0.035): this {
     this.a.copy(a);
     this.b.copy(b);
     this.c.copy(c);
     this.l1 = a.distanceTo(b) || 1e-4;
     this.l2 = b.distanceTo(c) || 1e-4;
-    this.blend = Math.min(0.06, 0.35 * Math.min(this.l1, this.l2));
+    // plus le pli est fermé, plus l'arrondi doit être large
+    const bend = 1 - new THREE.Vector3().subVectors(a, b).normalize().dot(new THREE.Vector3().subVectors(c, b).normalize()) * -1;
+    this.blend = Math.min(0.4 * Math.min(this.l1, this.l2), blendR * (1.2 + 1.3 * Math.min(1, bend)));
     this.p0.copy(b).lerp(a, this.blend / this.l1);
     this.p2.copy(b).lerp(c, this.blend / this.l2);
     return this;
@@ -493,6 +570,11 @@ class LimbPath {
 
   get length(): number {
     return this.l1 + this.l2;
+  }
+
+  /** demi-longueur de l'arrondi de l'articulation (m) */
+  get joint(): number {
+    return this.blend;
   }
 
   /** Point à la distance d le long du membre. */
@@ -516,6 +598,8 @@ class LimbPath {
 
 /** Surface tubulaire dont les anneaux sont recalculés à chaque image. */
 class FlexTube {
+  /** table de répartition des anneaux (partagée, recalculée à chaque mise à jour) */
+  private static cum = new Float64Array(49);
   readonly mesh: THREE.Mesh;
   private pos: THREE.BufferAttribute;
   private c = new THREE.Vector3();
@@ -554,8 +638,21 @@ class FlexTube {
    */
   update(path: LimbPath, d0: number, d1: number, radius: (d: number) => number, shift: (d: number) => number, scale = 1): void {
     const arr = this.pos.array as Float32Array;
+    // Anneaux resserrés autour de l'articulation (densité ×3,5 dans le pli) : la courbure du
+    // genou ou du coude est décrite finement, même en style facetté.
+    const N = 48, cum = FlexTube.cum;
+    const jc = path.l1, jw = Math.max(0.02, path.joint * 1.4);
+    cum[0] = 0;
+    for (let k = 1; k <= N; k++) {
+      const d = d0 + ((d1 - d0) * (k - 0.5)) / N;
+      cum[k] = cum[k - 1] + 1 + 2.5 * Math.exp(-((d - jc) * (d - jc)) / (jw * jw));
+    }
+    let k = 0;
     for (let i = 0; i <= this.rings; i++) {
-      const d = d0 + ((d1 - d0) * i) / this.rings;
+      const target = (cum[N] * i) / this.rings;
+      while (k < N - 1 && cum[k + 1] < target) k++;
+      const f = (target - cum[k]) / Math.max(1e-9, cum[k + 1] - cum[k]);
+      const d = d0 + ((d1 - d0) * (k + Math.min(1, Math.max(0, f)))) / N;
       path.frame(d, this.c, this.f);
       const r = radius(d) * scale;
       const sh = shift(d);
@@ -749,6 +846,182 @@ function mergeStatic(group: THREE.Object3D, keepApart: Set<THREE.Object3D>): voi
 }
 
 // ---------------------------------------------------------------------------
+// Selle et cintre relevés sur la photo de profil du vélo de route (en mètres) :
+// selle par rapport à son point de serrage, cintre et cocotte par rapport au haut du cintre.
+
+/** profil de la selle (bec vers l'avant, +x) */
+const SADDLE_PROFILE: Array<[number, number]> = [[-0.148, 0.048], [-0.008, 0.047], [0.089, 0.040], [0.124, 0.029], [0.116, 0.023], [0.035, 0.003], [-0.008, 0.005], [-0.061, -0.003], [-0.105, 0.016], [-0.137, 0.035]];
+/** cocotte (corps et levier) vue de côté */
+const HOOD_PROFILE: Array<[number, number]> = [[0.105, 0.008], [0.137, 0.027], [0.169, 0.039], [0.193, 0.027], [0.185, 0.005], [0.169, -0.018], [0.174, -0.079], [0.169, -0.139], [0.153, -0.124], [0.142, -0.063], [0.121, -0.018]];
+/** axe du cintre : du haut (côté potence) jusqu'au bout du bas de cintre */
+const DROP_PATH: Array<[number, number]> = [[0.024, -0.002], [0.064, -0.005], [0.093, -0.021], [0.103, -0.063], [0.084, -0.101], [0.024, -0.124], [-0.055, -0.130]];
+
+/** Pièce plate extrudée en z, centrée sur zc. */
+function extrudeFlat(profile: Array<[number, number]>, width: number, bevel: number): THREE.ExtrudeGeometry {
+  const g = new THREE.ExtrudeGeometry(new THREE.Shape(profile.map(([x, y]) => new THREE.Vector2(x, y))), {
+    depth: Math.max(0.001, width - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8,
+    bevelOffset: -bevel * 0.8, bevelSegments: 2, curveSegments: 4,
+  });
+  g.translate(0, 0, -(width - 2 * bevel) / 2);
+  return g;
+}
+
+/** Selle : profil relevé, large à l'arrière (14 cm) et fine au bec (3 cm). */
+function saddleGeometry(): THREE.BufferGeometry {
+  const g = extrudeFlat(SADDLE_PROFILE, 0.14, 0.012);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    // demi-largeur selon la position : 7 cm à l'arrière, 1,5 cm au bec
+    const t = Math.min(1, Math.max(0, (x + 0.07) / 0.17));
+    const hw = 0.07 - 0.055 * t * t;
+    pos.setZ(i, (pos.getZ(i) / 0.07) * hw);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Cadre « relevé sur photo » : contours de profil extrudés avec des bords arrondis.
+
+type UVMap = (x: number, y: number) => THREE.Vector2;
+
+function extrudeOutline(pts: THREE.Vector3[], hole: THREE.Vector3[] | null, width: number, bevel: number, uv?: UVMap): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, p.y)));
+  if (hole) shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
+  // coordonnées de texture : chaque point du cadre reçoit le pixel correspondant de la photo
+  // de profil (projection de côté), flancs, biseaux et tranches compris
+  const at = (v: number[], i: number) => uv!(v[i * 3], v[i * 3 + 1]);
+  const UVGenerator = uv ? {
+    generateTopUV: (_g: THREE.ExtrudeGeometry, v: number[], a: number, b: number, c: number) => [at(v, a), at(v, b), at(v, c)],
+    generateSideWallUV: (_g: THREE.ExtrudeGeometry, v: number[], a: number, b: number, c: number, d: number) => [at(v, a), at(v, b), at(v, c), at(v, d)],
+  } : undefined;
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.001, width - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.9,
+    // le biseau ne doit pas élargir la silhouette : on le prend vers l'intérieur du contour
+    bevelOffset: -bevel * 0.9, bevelSegments: 3, curveSegments: 4, UVGenerator,
+  });
+  g.translate(0, 0, -(width - 2 * bevel) / 2);
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Photos de profil déjà chargées (partagées entre tous les vélos ; null = introuvable). */
+const photoCache = new Map<string, THREE.Texture | null>();
+/** textures partagées : jamais libérées avec un modèle */
+const KEEP_TEX = new Set<THREE.Texture>();
+
+/**
+ * Peinture du cadre dessinée par le code, dans le repère de la photo de profil : couleur du
+ * cadre, léger dégradé de volume et grande inscription « HOMERIDE » le long du tube diagonal
+ * (comme le nom de marque sur les vrais cadres). Sert hors photo (site en ligne, coloris choisi).
+ */
+function paintedSkin(ol: FrameOutline, look: RiderLook): THREE.CanvasTexture {
+  const [W, H] = ol.size;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d')!;
+  g.fillStyle = look.frameColor;
+  g.fillRect(0, 0, W, H);
+  // reflet doux en haut du cadre, ombre vers le bas : donne du volume aux aplats
+  const grad = g.createLinearGradient(0, ol.headTop[1], 0, ol.bb[1] + 40);
+  grad.addColorStop(0, 'rgba(255,255,255,0.16)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.18)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+  // inscription le long du tube diagonal, du boîtier vers la douille
+  const [bx, by] = ol.bb, [hx, hy] = ol.headBot;
+  const ang = Math.atan2(hy - by, hx - bx);
+  const len = Math.hypot(hx - bx, hy - by);
+  const fs = Math.round(0.034 / ol.ky);
+  g.save();
+  g.translate(bx + (hx - bx) * 0.52, by + (hy - by) * 0.52);
+  g.rotate(ang);
+  g.font = `italic 800 ${fs}px "Segoe UI", system-ui, sans-serif`;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = look.frameColor2;
+  g.fillText('HOMERIDE', 0, 0, len * 0.62);
+  g.restore();
+  // bandeau de couleur 2 en haut du tube de selle
+  g.fillStyle = look.frameColor2;
+  g.fillRect(ol.seatTop[0] - 40, ol.seatTop[1] - 10, 80, 0.025 / ol.ky);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** Matériau de peau du cadre : photo de profil (finition « photo », en local) ou peinture dessinée. */
+function frameSkin(ol: FrameOutline, look: RiderLook): THREE.MeshStandardMaterial {
+  const painted = paintedSkin(ol, look);
+  const m = new THREE.MeshStandardMaterial({ map: painted, roughness: look.finish === 'matte' ? 0.72 : 0.34, metalness: 0.05 });
+  if (look.finish !== 'photo') return m;
+  // les photos sont dans le dossier image/ du projet (non publié) : absentes du site en ligne,
+  // la peinture dessinée reste alors en place
+  const url = '/' + encodeURI(ol.photo);
+  const cached = photoCache.get(url);
+  const use = (tex: THREE.Texture) => { m.map = tex; m.roughness = 0.4; m.needsUpdate = true; painted.dispose(); };
+  if (cached) use(cached);
+  else if (cached === undefined) {
+    new THREE.TextureLoader().load(url, (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = 8;
+      KEEP_TEX.add(tex);
+      photoCache.set(url, tex);
+      use(tex);
+    }, undefined, () => photoCache.set(url, null));
+  }
+  return m;
+}
+
+/**
+ * Décale en z une pièce latérale (haubans, bases) : écartée de zFar au niveau de la roue,
+ * elle se resserre jusqu'à zNear au point de jonction avec le cadre (x de xFar à xNear).
+ */
+function converge(g: THREE.BufferGeometry, xFar: number, xNear: number, zFar: number, zNear: number): THREE.BufferGeometry {
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.min(1, Math.max(0, (pos.getX(i) - xFar) / (xNear - xFar)));
+    pos.setZ(i, pos.getZ(i) + zFar + (zNear - zFar) * t);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildOutlineFrame(
+  bike: THREE.Group, ol: FrameOutline, P: (q: Pt) => THREE.Vector3, R: number,
+  skin: THREE.Material, mFork: THREE.Material | null, mSolid: THREE.Material, headBot: THREE.Vector3,
+): void {
+  const pts = (a: Pt[]) => a.map(P);
+  // passage mètres → coordonnées de texture dans la photo (même repère que le relevé)
+  const uv: UVMap = (x, y) => new THREE.Vector2(
+    (ol.rear[0] + x / ol.kx) / ol.size[0],
+    1 - (ol.rear[1] - (y - R) / ol.ky) / ol.size[1],
+  );
+  const fork = mFork ?? skin;
+  // triangle avant d'un seul tenant (tubes fondus les uns dans les autres, comme le carbone moulé)
+  bike.add(new THREE.Mesh(extrudeOutline(pts(ol.front3), pts(ol.hole), 0.042, 0.015, uv), skin));
+  const rearX = 0, bbX = P(ol.bb).x;
+  for (const side of [-1, 1]) {
+    // haubans : de la patte (écartés) vers le tube de selle (resserrés)
+    const ss = pts(ol.seatstay);
+    const ssJoin = Math.max(...ss.map((p) => p.x));
+    bike.add(new THREE.Mesh(converge(extrudeOutline(ss, null, 0.016, 0.006, uv), rearX, ssJoin, side * 0.064, side * 0.024), skin));
+    // bases : de la patte vers le boîtier de pédalier
+    bike.add(new THREE.Mesh(converge(extrudeOutline(pts(ol.chainstay), null, 0.02, 0.008, uv), rearX, bbX, side * 0.064, side * 0.034), skin));
+    // fourreaux de fourche : écartés à l'axe, resserrés sous la douille
+    const fk = pts(ol.fork);
+    const top = Math.min(...fk.map((p) => p.x)), axle = Math.max(...fk.map((p) => p.x));
+    bike.add(new THREE.Mesh(converge(extrudeOutline(fk, null, 0.02, 0.008, uv), axle, top, side * 0.055, side * 0.03), fork));
+  }
+  // té de fourche (relie les deux fourreaux sous la douille) et boîtier de pédalier
+  bike.add(blob(mFork ?? mSolid, headBot.clone().add(new THREE.Vector3(0.005, -0.012, 0)), 0.03, 0.022, 0.05));
+  bike.add(blob(mSolid, P(ol.bb), 0.032, 0.032, 0.045));
+}
+
+// ---------------------------------------------------------------------------
 
 /** Points clés d'un avatar (repère du groupe body : x vers l'avant, y vers le haut). */
 export interface RiderPose {
@@ -798,7 +1071,14 @@ export class RiderModel {
   private limbR: number;
   private shadow: THREE.Mesh;
 
-  constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean } = {}) {
+  /** cycliste debout à côté de son vélo (mode configuration de l'accueil) */
+  private standing = false;
+
+  /**
+   * opts.standing : cycliste seul, debout à gauche du vélo (côté opposé à la transmission), la main
+   * gauche posée sur la selle ; holdZ = écart (m) entre le cycliste et l'axe du vélo.
+   */
+  constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean; standing?: { holdZ: number } } = {}) {
     // Le vélo est toujours modélisé en style arrondi ; le cycliste suit le style choisi.
     const facetRider = look.style === 'facet';
     const useUnits = (facet: boolean) => {
@@ -850,9 +1130,10 @@ export class RiderModel {
     const TIRE_COLORS: Record<string, string> = { blue: '#1f5fd0', red: '#c8202a', white: '#e9e9e9', yellow: '#f2c21b', green: '#2e9e4f' };
     const mTireColor = TIRE_COLORS[look.tireWall] ? lam(TIRE_COLORS[look.tireWall], { roughness: 0.7 }) : null;
     // roues aluminium (jante basse ou 30 mm) : jante métal, rayons argentés, sans décor
-    const alloy = look.wheels === 'alu' || look.wheels === 'alu30';
+    const alloy = look.wheels === 'alu' || look.wheels === 'alu30' || look.wheels === 'g25';
     const mRim = alloy ? shiny('#3a3d41', 50) : shiny('#1d1e20', 70, '#666666');
-    const mDecalW = lam('#d9dde0', { side: THREE.DoubleSide });
+    // inscriptions de jante discrètes (gris clair, comme les logos ton sur ton des roues carbone)
+    const mDecalW = lam('#5d6166', { side: THREE.DoubleSide });
     const mTape = lam(look.barTape);
     const mSaddle = lam(look.saddleColor);
     const mSkin = lam(look.skin);
@@ -867,10 +1148,15 @@ export class RiderModel {
     mHelmet.side = THREE.DoubleSide; // l'intérieur des coques ouvertes reste visible
     const mHelmetDark = lam('#1a1a1a');
     const lens = LENS[look.lens] ?? LENS.dark;
-    const mLens = new THREE.MeshStandardMaterial({
-      color: lens.color, emissive: lens.specular, emissiveIntensity: 0.08, roughness: 0.05, metalness: 0.9,
-      side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1, flatShading: FACET,
+    // verre miroir : reflets métalliques et irisation (les verres de course changent de teinte
+    // selon l'angle de vue)
+    const mLens = new THREE.MeshPhysicalMaterial({
+      color: lens.color, emissive: lens.specular, emissiveIntensity: 0.06, roughness: 0.04, metalness: 0.85,
+      clearcoat: 1, clearcoatRoughness: 0.03, iridescence: look.lens === 'dark' || look.lens === 'clear' ? 0.25 : 0.9,
+      iridescenceIOR: 1.6, iridescenceThicknessRange: [250, 600],
+      side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1,
     });
+    const mGlassFrame = shiny(look.glassesFrame ?? '#f2f2f2', 60, '#888888');
     own.push(mLens);
     const jerseyTex = jerseyTexture(look);
     const mJersey = lam('#ffffff', { map: jerseyTex });
@@ -883,11 +1169,14 @@ export class RiderModel {
     const bike = new THREE.Group();
     const R = geo.R;
     const rear = V(0, R);
-    const bb = (this.bb = V(geo.bb[0], geo.bb[1]));
-    const seatTop = V(...geo.seatTop);
-    let headTop = V(...geo.headTop), headBot = V(...geo.headBot);
-    let front = V(geo.wheelbase, R);
-    if (!geo.suspension) {
+    // Cadre relevé sur photo : points clés et silhouette en mètres (axe arrière à l'origine).
+    const ol = (OUTLINES as Partial<Record<FrameId, FrameOutline>>)[look.frame];
+    const P = (q: Pt) => V((q[0] - ol!.rear[0]) * ol!.kx, R + (ol!.rear[1] - q[1]) * ol!.ky);
+    const bb = (this.bb = ol ? P(ol.bb) : V(geo.bb[0], geo.bb[1]));
+    const seatTop = ol ? P(ol.seatTop) : V(...geo.seatTop);
+    let headTop = ol ? P(ol.headTop) : V(...geo.headTop), headBot = ol ? P(ol.headBot) : V(...geo.headBot);
+    let front = ol ? V(P(ol.front).x, R) : V(geo.wheelbase, R);
+    if (!geo.suspension && !ol) {
       // Fourche de longueur réaliste (axe → té) : la roue garde du jeu sous le tube diagonal.
       // On garde l'angle et la longueur de douille, on remonte la douille, la roue avance d'autant.
       const axis = new THREE.Vector3().subVectors(headTop, headBot);
@@ -924,6 +1213,13 @@ export class RiderModel {
     };
     const ttDepth = Math.min(D, 1.4);
     const dtEnd = headBot.clone().add(V(-0.01, -0.01));
+    if (ol) {
+      const skin = frameSkin(ol, look);
+      own.push(skin);
+      const fork = look.forkColor && look.finish !== 'photo' ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : null;
+      buildOutlineFrame(bike, ol, P, R, skin, fork, mFrame, headBot);
+    }
+    else {
     // triangle avant
     if (geo.shape === 'foil') {
       // Foil : tube de selle qui épouse la roue (léger arc vers l'avant), tube diagonal qui
@@ -940,6 +1236,37 @@ export class RiderModel {
       ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.035)), 0.0115, 1.5, 0.0135, 1.9);
       const ht = new THREE.Mesh(AIRFOIL, mFrame);
       place(ht, headBot.clone().add(V(0.004, -0.06)), headTop.clone().add(V(-0.004, 0.012)), 0.02, 1.75);
+      bike.add(ht);
+    } else if (geo.shape === 'speedmax') {
+      // CLM : tout est profond. Tube de selle qui épouse la roue arrière, tube diagonal très
+      // haut, tube horizontal qui s'évase vers une douille massive fondue dans la fourche.
+      const bow = bb.clone().lerp(seatTop, 0.4).add(V(0.04, 0));
+      ttaper(bb, bow, 0.016, 3.2, 0.015, 3.4);
+      ttaper(bow, seatTop, 0.015, 3.4, 0.0135, 2.6);
+      bike.add(blob(mFrame, bow, 0.05, 0.022, 0.015));
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, 0.017, 2.8, 0.02, 3.6);
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.02, -0.03)), 0.0125, 2.2, 0.018, 3.0);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.006, -0.075)), headTop.clone().add(V(-0.004, 0.01)), 0.022, 2.8);
+      bike.add(ht);
+      // capot avant : la douille, le tube horizontal et la fourche ne font qu'un bloc
+      bike.add(blob(mFrame, dtEnd.clone().add(V(-0.01, -0.005)), 0.065, 0.045, 0.022));
+      bike.add(blob(mFrame, headTop.clone().add(V(-0.04, -0.03)), 0.06, 0.03, 0.02));
+    } else if (geo.shape === 'crux') {
+      // gravel léger : tubes ronds et fins, tube horizontal légèrement plongeant, douille conique
+      ftube(bb, seatTop, T * 1.0, 1);
+      ftube(bb.clone().add(V(0.008, 0.008)), dtEnd, T * 1.45, 1.1);
+      ftube(seatTop.clone().add(V(-0.008, -0.005)), headTop.clone().add(V(-0.012, -0.022)), T * 0.92, 1);
+      const ht = new THREE.Mesh(HEAD_TUBE, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.035)), headTop.clone().add(V(-0.004, 0.012)), T * 1.7, 1);
+      bike.add(ht);
+    } else if (geo.shape === 'evo') {
+      // route moderne : tubes à profil tronqué, tube diagonal large, tube horizontal plongeant
+      ttaper(bb, seatTop, T * 1.05, 1.9, T * 0.95, 1.6);
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, T * 1.45, 1.8, T * 1.55, 2.2);
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.022)), T * 0.9, 1.4, T * 1.0, 1.8);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.045)), headTop.clone().add(V(-0.004, 0.012)), T * 1.6, 1.7);
       bike.add(ht);
     } else if (geo.shape === 'rcrg') {
       // RCR-G : tube de selle fin, tube diagonal profond qui s'élargit vers l'avant,
@@ -962,12 +1289,15 @@ export class RiderModel {
     }
     bike.add(blob(mFrame, bb, 0.034, 0.034, 0.045)); // boîtier de pédalier
     bike.add(blob(mFrame, seatTop.clone().add(V(-0.004, -0.008)), T * 1.25, T * 1.6, T * 1.1)); // nœud de selle
-    // décor « MyHomeRide » sur les deux flancs du tube diagonal
+    // décor « HomeRide » sur les deux flancs du tube diagonal
     {
       const mWord = lam('#ffffff', { map: wordmarkTexture(look.frameColor2), transparent: true, alphaTest: 0.35, polygonOffset: true, polygonOffsetFactor: -2 });
       for (const g of [DECAL_R, DECAL_L]) {
         const m = new THREE.Mesh(g, mWord);
         if (geo.shape === 'foil') place(m, bb, dtEnd, 0.0175, 2.0);
+        else if (geo.shape === 'speedmax') place(m, bb, dtEnd, 0.0195, 3.0);
+        else if (geo.shape === 'crux') place(m, bb, dtEnd, T * 1.47, 1.15);
+        else if (geo.shape === 'evo') place(m, bb, dtEnd, T * 1.52, 2.0);
         else if (geo.shape === 'rcrg') place(m, bb, dtEnd, T * 1.45, 2.2);
         else place(m, bb, dtEnd, T * 1.4, D * 0.95);
         bike.add(m);
@@ -975,6 +1305,7 @@ export class RiderModel {
     }
     // liseré de couleur 2 sur le haut du tube de selle et le bas de la fourche
     if (!geo.shape) ftube(bb.clone().lerp(seatTop, 0.88), seatTop, T * 1.04, D * 1.02, mDecal);
+    else if (geo.shape === 'evo') ttaper(bb.clone().lerp(seatTop, 0.86), seatTop, T * 1.0, 1.65, T * 0.97, 1.62, mDecal);
 
     // triangle arrière
     const pivot = bb.clone().add(V(-0.035, 0.08));
@@ -983,7 +1314,8 @@ export class RiderModel {
       // bases (pour le VTT : bras oscillant jusqu'au pivot principal)
       ftube(V(0, R, z), geo.suspension ? V(pivot.x, pivot.y, z * 0.6) : V(bb.x - 0.03, bb.y + 0.005, z * 0.5), T * (geo.suspension ? 0.85 : 0.68), 1.25);
       // haubans plongeants
-      ftube(V(0.005, R + 0.005, z), V(stayTop.x - (geo.suspension ? 0.05 : 0), stayTop.y, z * 0.32), T * 0.55, Math.min(D, 1.5));
+      const stayR = geo.shape === 'speedmax' ? T * 0.7 : geo.shape === 'crux' ? T * 0.5 : T * 0.55;
+      ftube(V(0.005, R + 0.005, z), V(stayTop.x - (geo.suspension ? 0.05 : 0), stayTop.y, z * 0.32), stayR, geo.shape === 'speedmax' ? 2.2 : geo.shape === 'crux' ? 1 : Math.min(D, 1.5));
       bike.add(box(mFrame, V(0.005, R, z * 1.02), 0.04, 0.03, 0.008)); // patte de roue
     }
     if (geo.suspension) {
@@ -1021,14 +1353,18 @@ export class RiderModel {
       const mFork = look.forkColor ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : mFrame;
       const crown = V(headBot.x + 0.004, headBot.y - 0.04);
       if (geo.shape === 'foil') bike.add(blob(mFork, crown.clone().add(V(0.004, -0.004)), 0.036, 0.026, 0.055));
+      else if (geo.shape === 'speedmax') bike.add(blob(mFork, crown.clone().add(V(0.01, 0)), 0.06, 0.03, 0.06));
       else bike.add(blob(mFork, crown, 0.026, 0.018, 0.05));
-      const slim = geo.shape === 'rcrg';
+      const slim = geo.shape === 'rcrg' || geo.shape === 'crux';
+      const deepFork = geo.shape === 'speedmax' ? 3.2 : geo.shape === 'foil' ? 2.6 : slim ? 1.75 : 2.0;
       for (const z of [-0.055, 0.055]) {
         // fourreaux fins qui s'affinent vers l'axe (≈ 2 cm × 3,5 cm sous le té sur le gravel)
-        const m = new THREE.Mesh(taperedPrism(slim ? 0.0085 : T * 0.75, slim ? 1.6 : 2.0, slim ? 0.0105 : T * 1.05, slim ? 1.75 : geo.shape === 'foil' ? 2.6 : 2.0, FACET), mFork);
+        const m = new THREE.Mesh(taperedPrism(slim ? 0.0085 : T * 0.75, slim ? 1.6 : 2.0, slim ? 0.0105 : T * 1.05, deepFork, FACET), mFork);
         place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.75), 1, 1);
         bike.add(m);
       }
+    }
+
     }
 
     // ----- Position du cycliste : selle, hanche, buste, mains.
@@ -1061,15 +1397,25 @@ export class RiderModel {
       tube(mBlack, seatTop, mid, 0.017);
       tube(shiny('#2b2d30', 70, '#888888'), mid, postEnd, 0.0145);
     } else {
-      if (geo.shape === 'rcrg') tube(mBlack, seatTop, postEnd, 0.0135); // tige ronde et fine
+      if (geo.shape === 'rcrg' || geo.shape === 'crux') tube(mBlack, seatTop, postEnd, 0.0135); // tige ronde et fine
+      else if (geo.shape === 'speedmax') ttaper(seatTop, postEnd, 0.013, 2.6, 0.012, 2.2); // tige CLM profonde
       else if (geo.shape === 'foil') ttaper(seatTop, postEnd, 0.012, 1.9, 0.0115, 1.7); // tige aéro profonde
       else ftube(seatTop, postEnd, T * 0.95, Math.min(D, 1.9), D > 2 ? mFrame : mBlack); // tige profilée
     }
-    // selle à bec court (rembourrage + coque)
-    bike.add(blob(mSaddle, saddle.clone().add(V(-0.04, 0.013)), 0.07, 0.019, 0.072));
-    bike.add(blob(mSaddle, saddle.clone().add(V(0.055, 0.007)), 0.075, 0.016, 0.032));
-    bike.add(blob(mBlack, saddle.clone().add(V(-0.01, 0.0)), 0.11, 0.012, 0.055));
-    bike.add(blob(mBlack, saddle.clone().add(V(-0.02, 0.031)), 0.06, 0.004, 0.01)); // canal central
+    if (geo.shape === 'speedmax') {
+      // CLM : bidon couché derrière la selle (sur son support) et sacoche « bento » sur le tube horizontal
+      const cage = saddle.clone().add(V(-0.14, -0.045));
+      tube(mBlack, saddle.clone().add(V(-0.06, -0.01)), cage, 0.006);
+      tube(mBlack, cage.clone().add(V(-0.055, -0.01)), cage.clone().add(V(0.045, 0.0)), 0.033);
+      bike.add(box(mBlack, headTop.clone().add(V(-0.1, 0.012)), 0.11, 0.04, 0.045));
+    }
+    // selle : profil relevé sur photo, rembourrage et coque d'un seul tenant
+    {
+      const sm = new THREE.Mesh(saddleGeometry(), mSaddle);
+      sm.position.copy(saddle);
+      bike.add(sm);
+      bike.add(blob(mBlack, saddle.clone().add(V(-0.01, 0.006)), 0.1, 0.01, 0.05)); // coque sous le rembourrage
+    }
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, -0.03)), saddle.clone().add(V(0.12, 0.0, -0.015)), 0.003);
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, 0.03)), saddle.clone().add(V(0.12, 0.0, 0.015)), 0.003);
 
@@ -1153,26 +1499,33 @@ export class RiderModel {
         }
         for (const side of [-1, 1]) {
           const z = side * w;
-          const curve = new THREE.CatmullRomCurve3([
-            V(barCenter.x + 0.004, barCenter.y, side * (w - 0.06)),
-            V(barCenter.x + 0.015, barCenter.y, side * (w - 0.025)),
-            V(barCenter.x + 0.065, barCenter.y - 0.005, z),
-            V(barCenter.x + 0.09, barCenter.y - 0.055, z + side * flare * 0.4),
-            V(barCenter.x + 0.065, barCenter.y - 0.12, z + side * flare),
-            V(barCenter.x - 0.02, barCenter.y - 0.128, z + side * flare),
-          ]);
+          // cintre : axe relevé sur la photo (haut du cintre → cocotte → bas de cintre), évasé en gravel
+          const pts = DROP_PATH.map(([dx, dy], i) => {
+            const f = i / (DROP_PATH.length - 1);
+            return V(barCenter.x + dx, barCenter.y + dy, i === 0 ? side * (w - 0.05) : z + side * flare * f);
+          });
+          const curve = new THREE.CatmullRomCurve3(pts);
           bike.add(new THREE.Mesh(new THREE.TubeGeometry(curve, seg(30, 14), 0.0118, seg(8, 4)), mTape));
-          // cocotte et levier
-          const hood = V(barCenter.x + 0.08, barCenter.y + 0.012, z + side * 0.002);
-          const h = blob(mBlack, hood.clone().add(V(-0.005, -0.002)), 0.042, 0.02, 0.016);
-          h.rotation.z = 0.3;
-          bike.add(h, blob(mBlack, hood.clone().add(V(0.03, 0.012)), 0.012, 0.014, 0.012));
-          tube(mGroup, hood.clone().add(V(0.025, -0.01)), hood.clone().add(V(0.02, -0.12)), 0.0055, 1.8);
-          hands.push(hood.clone().add(V(-0.005, 0.02, 0)));
+          // cocotte et levier : profil relevé sur la photo
+          const hm = new THREE.Mesh(extrudeFlat(HOOD_PROFILE, 0.032, 0.008), mBlack);
+          hm.position.set(barCenter.x, barCenter.y, z + side * 0.004);
+          bike.add(hm);
+          // main posée sur le dessus de la cocotte
+          hands.push(V(barCenter.x + 0.145, barCenter.y + 0.04, z));
         }
       }
       // Épaule : à torsoLen de la hanche et à portée de bras (coudes un peu fléchis) des mains.
       shoulder = fitShoulder(hip, hands[1].clone().sub(shOff).setZ(0), torsoLen, (upperArm + foreArm) * (geo.hands === 'flat' ? 0.88 : 0.9));
+    }
+    if (opts.standing) {
+      // Debout, jambes presque tendues, buste droit ; une main sur la selle, l'autre le long du corps.
+      this.standing = true;
+      this.hip.set(saddle.x - 0.1 * s, 0.085 + (this.thighLen + this.shinLen) * 0.985, 0);
+      shoulder = hip.clone().add(V(0.025 * s, torsoLen));
+      hands.length = 0;
+      elbows.length = 0;
+      hands.push(shoulder.clone().add(V(0.03 * s, -0.6 * s, -0.215 * s)));
+      hands.push(saddle.clone().add(V(-0.01, 0.035, opts.standing.holdZ - 0.02)));
     }
     const ta = Math.atan2(shoulder.y - hip.y, shoulder.x - hip.x);
     // potence
@@ -1213,10 +1566,13 @@ export class RiderModel {
     }
 
     // ----- Roues
-    const rimDepth = WHEELS[look.wheels].rimDepth / 1000;
+    const wspec = WHEELS[look.wheels] ?? WHEELS.c40;
     const tireR = geo.tire;
     for (const c of [rear, front]) {
       const isRear = c === rear;
+      // hauteur de jante propre à chaque roue (profils avant/arrière différents) ; roue pleine à l'arrière
+      const rimDepth = (isRear ? wspec.rimDepthRear ?? wspec.rimDepth : wspec.rimDepth) / 1000;
+      const disc = isRear && !!wspec.rearDisc;
       const w = new THREE.Group();
       w.position.copy(c);
       bike.add(w);
@@ -1245,8 +1601,22 @@ export class RiderModel {
         w.add(knobs);
       }
       const rimOut = R - 2 * tireR + 0.003;
-      const rimIn = rimOut - Math.max(0.02, rimDepth);
-      for (const z of [-0.0095, 0.0095]) {
+      const rimIn = disc ? 0.03 : rimOut - Math.max(0.02, rimDepth);
+      if (disc) {
+        // lenticulaire : deux flancs légèrement bombés, du moyeu (épais) à la jante (fine)
+        const prof: THREE.Vector2[] = [];
+        for (let k = 0; k <= 8; k++) {
+          const r = 0.03 + (rimOut - 0.03) * (k / 8);
+          prof.push(new THREE.Vector2(r, 0.026 - 0.0165 * Math.pow(k / 8, 1.4)));
+        }
+        for (const sgn of [1, -1]) {
+          const lens = new THREE.Mesh(new THREE.LatheGeometry(prof, seg(64, 24)), mRim);
+          lens.rotation.x = sgn * Math.PI / 2;
+          (lens.material as THREE.Material).side = THREE.DoubleSide;
+          w.add(lens);
+        }
+      }
+      for (const z of disc ? [] : [-0.0095, 0.0095]) {
         const ring = new THREE.Mesh(new THREE.RingGeometry(rimIn, rimOut, 64), mRim);
         ring.position.z = z;
         (ring.material as THREE.Material).side = THREE.DoubleSide;
@@ -1260,8 +1630,8 @@ export class RiderModel {
           }
         }
       }
-      // rayons (lignes fines) : alternés gauche/droite
-      const nSpokes = alloy ? 28 : 24;
+      // rayons (lignes fines) : alternés gauche/droite (aucun sur une roue pleine)
+      const nSpokes = disc ? 0 : alloy ? 28 : 24;
       const pts: number[] = [];
       for (let k = 0; k < nSpokes; k++) {
         const a = (k / nSpokes) * Math.PI * 2;
@@ -1286,11 +1656,15 @@ export class RiderModel {
       rotor.position.z = -0.065;
       w.add(rotor);
       if (isRear) {
-        // cassette
-        const cas = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.055, 0.035, 20), mGroup);
-        cas.rotation.x = Math.PI / 2;
-        cas.position.z = 0.04;
-        w.add(cas);
+        // cassette : 11 pignons étagés (du plus grand, côté rayons, au plus petit), argentés
+        const mCog = shiny('#aeb3b8', 80, '#dddddd');
+        for (let k = 0; k < 11; k++) {
+          const r = 0.056 - k * 0.0029;
+          const cog = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.0018, seg(32, 16)), k % 2 ? mCog : mGroup);
+          cog.rotation.x = Math.PI / 2;
+          cog.position.z = 0.026 + k * 0.0037;
+          w.add(cog);
+        }
       }
       this.wheels.push(w);
     }
@@ -1301,11 +1675,25 @@ export class RiderModel {
     // ----- Transmission
     this.crank.position.copy(bb);
     const ringR = geo.suspension ? 0.075 : 0.1;
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(ringR, ringR, 0.005, 44), mGroup);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.z = 0.065;
-    this.crank.add(ring);
-    const spider = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.012, 5), mBlack);
+    // plateaux ajourés : deux couronnes dentées (grand et petit plateau), une araignée à
+    // 4 branches et un moyeu, au lieu d'un disque plein
+    const mTeeth = shiny('#9aa0a6', 60, '#cccccc');
+    for (const [r, z] of [[ringR, 0.066], [ringR * 0.78, 0.06]] as const) {
+      const band = new THREE.Mesh(new THREE.RingGeometry(r - 0.014, r, 48), mGroup);
+      band.position.z = z;
+      (band.material as THREE.Material).side = THREE.DoubleSide;
+      this.crank.add(band);
+      const teeth = new THREE.Mesh(new THREE.TorusGeometry(r, 0.0025, 4, 48), mTeeth);
+      teeth.position.z = z;
+      this.crank.add(teeth);
+    }
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + 0.4;
+      const arm = new THREE.Mesh(UNIT_CYL, mGroup);
+      place(arm, V(0, 0, 0.068), V(Math.cos(a) * (ringR - 0.008), Math.sin(a) * (ringR - 0.008), 0.067), 0.0085, 2.2);
+      this.crank.add(arm);
+    }
+    const spider = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.014, 20), mGroup);
     spider.rotation.x = Math.PI / 2;
     spider.position.z = 0.07;
     this.crank.add(spider);
@@ -1319,12 +1707,43 @@ export class RiderModel {
     tube(mGroup, V(bb.x, bb.y, -0.07), V(bb.x, bb.y, 0.07), 0.021);
     const chainZ = 0.06;
     const cogTop = rear.clone().add(V(0, opts.trainer ? 0.04 : 0.045, chainZ));
-    const cogBot = rear.clone().add(V(0.0, -0.04, chainZ));
     const mChain = shiny('#6f757b', 40);
     tube(mChain, V(bb.x, bb.y + ringR, chainZ), cogTop, 0.0035);
-    tube(mChain, V(bb.x, bb.y - ringR, chainZ), cogBot.clone().add(V(0.01, -0.05)), 0.0035);
-    bike.add(box(mGroup, rear.clone().add(V(0.0, -0.085, 0.065)), 0.035, 0.07, 0.018)); // dérailleur arrière
-    bike.add(box(mGroup, bb.clone().lerp(seatTop, 0.2).add(V(0.03, 0, 0.035)), 0.045, 0.02, 0.012)); // dérailleur avant
+    // Dérailleur arrière (proportions relevées sur les photos) : corps accroché à la patte,
+    // parallélogramme, chape à deux flasques et deux galets ; la chaîne passe par les galets.
+    const rdZ = 0.072;
+    const upPulley = rear.clone().add(V(0.012, -0.072, rdZ));
+    const lowPulley = rear.clone().add(V(0.004, -0.152, rdZ));
+    {
+      const body = box(mGroup, rear.clone().add(V(-0.022, -0.032, rdZ + 0.006)), 0.06, 0.03, 0.022);
+      body.rotation.z = -0.55;
+      bike.add(body);
+      bike.add(box(mGroup, rear.clone().add(V(0.004, -0.052, rdZ + 0.004)), 0.032, 0.03, 0.02)); // parallélogramme
+      const cage: Array<[number, number]> = [[-0.012, -0.06], [0.03, -0.062], [0.028, -0.1], [0.022, -0.168], [0.004, -0.178], [-0.014, -0.165], [-0.016, -0.1]];
+      for (const dz of [-0.008, 0.008]) {
+        const plate = new THREE.Mesh(extrudeFlat(cage, 0.003, 0.0008), mGroup);
+        plate.position.set(rear.x, rear.y, rdZ + dz);
+        bike.add(plate);
+      }
+      for (const pc of [upPulley, lowPulley]) {
+        const pulley = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.01, seg(20, 10)), mBlack);
+        pulley.rotation.x = Math.PI / 2;
+        pulley.position.copy(pc);
+        bike.add(pulley);
+      }
+    }
+    // brin inférieur de la chaîne : plateau → galet bas → galet haut → cassette
+    tube(mChain, V(bb.x, bb.y - ringR, chainZ), lowPulley.clone().add(V(0, -0.016, 0)).setZ(chainZ), 0.0035);
+    tube(mChain, lowPulley.clone().add(V(-0.016, 0, 0)).setZ(chainZ), upPulley.clone().add(V(-0.016, 0, 0)).setZ(chainZ), 0.0035);
+    // dérailleur avant : chape incurvée devant le tube de selle, moteur électronique derrière
+    {
+      const fd = bb.clone().lerp(seatTop, 0.24).add(V(0.035, 0, 0));
+      const cagePlate: Array<[number, number]> = [[-0.03, 0.01], [0.035, 0.015], [0.03, -0.012], [-0.025, -0.016]];
+      const plate = new THREE.Mesh(extrudeFlat(cagePlate, 0.004, 0.001), mGroup);
+      plate.position.set(fd.x, fd.y, 0.07);
+      bike.add(plate);
+      bike.add(box(mGroup, fd.clone().add(V(-0.025, 0.02, 0.05)), 0.03, 0.035, 0.02)); // moteur
+    }
 
     // ----- Bidons
     const mBottle = lam(look.bottleColor);
@@ -1493,7 +1912,7 @@ export class RiderModel {
       for (const z of [-0.22, 0.22]) vent(shell, 0.82, z, 0.09, 0.08); // prises d'air frontales
       vent(shell, -0.9, 0, 0.18, 0.12); // sortie d'air arrière
       helmetParts.push(shell);
-      const visor = new THREE.Mesh(G.lens, mLens);
+      const visor = new THREE.Mesh(G.lensShield, mLens); // visière du casque CLM
       visor.scale.set(0.106 * hs, 0.072 * hs, 0.106 * hs);
       visor.position.copy(headC).add(V(0.008 * hs, 0.002 * hs));
       helmetParts.push(visor);
@@ -1534,17 +1953,53 @@ export class RiderModel {
       place(strap, headC.clone().add(V(-0.01 * hs, 0.02 * hs, side * 0.083 * hs)), headC.clone().add(V(0.04 * hs, -0.11 * hs, side * 0.025 * hs)), 0.003);
       helmetParts.push(strap);
     }
-    // lunettes enveloppantes
+    // lunettes de sport : verre selon le modèle, monture sur le haut du verre, branches épaisses
+    // qui s'affinent jusqu'au-dessus de l'oreille
     if (look.glasses && look.helmetType !== 'tt') {
-      const glass = new THREE.Mesh(G.lens, mLens);
-      glass.scale.set(0.094 * hs, 0.036 * hs, 0.094 * hs);
-      glass.position.copy(headC).add(V(0.013 * hs, 0.014 * hs));
+      const model: GlassesModel = look.glassesModel ?? 'shield';
+      const geo = model === 'shield' ? G.lensShield : model === 'halfrim' ? G.lensHalfrim : G.lensWrap;
+      const sc = V(0.097 * hs, (model === 'shield' ? 0.058 : model === 'halfrim' ? 0.05 : 0.042) * hs, 0.093 * hs);
+      const c0 = headC.clone().add(V(0.013 * hs, (model === 'shield' ? 0.008 : 0.014) * hs));
+      const glass = new THREE.Mesh(geo, mLens);
+      glass.scale.copy(sc);
+      glass.position.copy(c0);
       helmetParts.push(glass);
+      // point du bord haut du verre à l'angle a (même déformation que lensGeometry)
+      const shape = LENS_SHAPES[model];
+      const edge = (ang: number, yOff = 0) => {
+        const u = Math.abs(ang) / 1.25;
+        const r = 1.015 * (1 + 0.06 * (1 - 1));
+        return V(c0.x + Math.cos(ang) * sc.x * r, c0.y + (shape.top(ang, u) + yOff) * sc.y, c0.z + Math.sin(ang) * sc.z * r);
+      };
+      const rimPts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 24; k++) rimPts.push(edge(-1.25 + (2.5 * k) / 24, 0.02));
+      const rimR = model === 'wrap' ? 0.0026 : 0.0036;
+      helmetParts.push(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 48, rimR, 6), mGlassFrame));
       for (const side of [-1, 1]) {
-        const arm = new THREE.Mesh(UNIT_CYL, mBlack);
-        place(arm, headC.clone().add(V(0.035 * hs, 0.016 * hs, side * 0.083 * hs)), headC.clone().add(V(-0.04 * hs, 0.012 * hs, side * 0.086 * hs)), 0.0025);
-        helmetParts.push(arm);
+        // charnière et branche : épaisse à l'avant, fine au-dessus de l'oreille
+        const hinge = edge(side * 1.25, -0.15);
+        const temple = new THREE.CatmullRomCurve3([
+          hinge,
+          headC.clone().add(V(-0.01 * hs, 0.018 * hs, side * 0.088 * hs)),
+          headC.clone().add(V(-0.055 * hs, 0.006 * hs, side * 0.087 * hs)),
+        ]);
+        const tg = new THREE.TubeGeometry(temple, 16, 0.0045, 6);
+        // effilement : rayon divisé par deux vers l'arrière
+        const p = tg.getAttribute('position');
+        const ctr = new THREE.Vector3();
+        for (let i = 0; i < p.count; i++) {
+          const ring = Math.floor(i / 7), t = ring / 16;
+          temple.getPoint(t, ctr);
+          const k = 1 - 0.5 * t;
+          p.setXYZ(i, ctr.x + (p.getX(i) - ctr.x) * k, ctr.y + (p.getY(i) - ctr.y) * k * 1.6, ctr.z + (p.getZ(i) - ctr.z) * k);
+        }
+        tg.computeVertexNormals();
+        helmetParts.push(new THREE.Mesh(tg, mGlassFrame));
+        // embout de monture à l'extrémité du verre (écran et demi-cerclage)
+        if (model !== 'wrap') helmetParts.push(blob(mGlassFrame, hinge, 0.008, 0.012, 0.006));
       }
+      // plaquettes de nez
+      helmetParts.push(blob(lam('#8d9297', { transparent: true, opacity: 0.55 }), c0.clone().add(V(sc.x * 0.97, -0.36 * sc.y)), 0.004, 0.006, 0.009));
     }
     if (helmetParts.length) this.body.add(...helmetParts);
     this.headParts.push(...helmetParts);
@@ -1557,14 +2012,15 @@ export class RiderModel {
       const hand = hands[i].clone();
       const elbow = elbows[i] ?? solve2(sh, hand, upperArm, foreArm, -1).setZ(side * 0.235 * s);
       const ur = 0.046 * s * wm, fr = 0.038 * s * wm;
-      this.body.add(blob(mShoulder, sh, 0.062 * s * wm, 0.06 * s * wm, 0.058 * s * wm)); // épaule
-      const path = new LimbPath().set(sh, elbow, hand);
+      // épaule : arrondi discret, rentré dans le buste (plus d'« épaulette »)
+      this.body.add(blob(mShoulder, sh.clone().add(V(0, -0.004 * s, -side * 0.012 * s)), 0.052 * s * wm, 0.05 * s * wm, 0.048 * s * wm));
+      const path = new LimbPath().set(sh, elbow, hand, 0.042 * s * wm);
       const L1 = path.l1, L = path.length;
       const radius = (d: number) => (d < L1 ? ur * rAt(UPPER_ARM, d / L1) : fr * rAt(FOREARM, (d - L1) / path.l2));
       const shift = (d: number) => (d < L1 ? 0.12 * ur * bump(d / L1, 0.45, 0.25) : 0);
-      const skin = new FlexTube(mSkin, seg(22, 10), seg(12, 6));
+      const skin = new FlexTube(mSkin, seg(28, 16), seg(14, 7));
       skin.update(path, 0, L - 0.01, radius, shift);
-      const sleeve = new FlexTube(mSleeveCuff, seg(12, 6), seg(12, 6));
+      const sleeve = new FlexTube(mSleeveCuff, seg(14, 8), seg(14, 7));
       sleeve.update(path, 0, longSleeves ? L - 0.03 : 0.55 * L1, radius, shift, 1.1);
       this.body.add(skin.mesh, sleeve.mesh);
       // main (gant) et doigts
@@ -1579,9 +2035,9 @@ export class RiderModel {
     mShorts.side = THREE.DoubleSide;
     mSock.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
-      const skin = new FlexTube(mSkin, seg(34, 14), seg(16, 7));
-      const shorts = new FlexTube(mShorts, seg(14, 6), seg(16, 7));
-      const sock = new FlexTube(mSock, seg(12, 5), seg(16, 7));
+      const skin = new FlexTube(mSkin, seg(40, 22), seg(16, 8));
+      const shorts = new FlexTube(mShorts, seg(16, 9), seg(16, 8));
+      const sock = new FlexTube(mSock, seg(14, 7), seg(16, 8));
       const overshoe = look.overshoes ? new FlexTube(mShoe, 4, seg(16, 7)) : null;
       const ankle = blob(look.overshoes ? mShoe : mSock, V(0, 0), 1, 1, 1);
       // chaussure : repère local centré sur l'axe de la pédale
@@ -1623,6 +2079,10 @@ export class RiderModel {
     this.shadow.visible = !opts.trainer;
     this.root.add(this.shadow);
 
+    if (opts.standing) {
+      // cycliste seul : le vélo est dessiné à part (vélo exposé du mode configuration)
+      for (const o of this.body.children.slice(0, riderStart)) this.body.remove(o);
+    }
     if (opts.bikeOnly) {
       // vélo seul (accroché au mur de l'atelier) : on retire le cycliste
       for (const o of this.body.children.slice(riderStart)) this.body.remove(o);
@@ -1672,13 +2132,14 @@ export class RiderModel {
     const s = this.s, wm = this.limbR;
     for (const leg of this.legs) {
       const a = this.crankAngle + (leg.side > 0 ? 0 : Math.PI);
-      const z = leg.side * Q;
-      const pedal = this.pedalAt(this.bb, a, z);
-      const ankle = this.ankleAt(this.bb, a, z);
+      const z = this.standing ? leg.side * 0.11 * s : leg.side * Q;
+      // debout : pieds à plat au sol sous la hanche ; sinon sur les pédales
+      const pedal = this.standing ? V(this.hip.x + 0.07 * s, 0.006, z) : this.pedalAt(this.bb, a, z);
+      const ankle = this.standing ? V(this.hip.x + 0.005, 0.085, z) : this.ankleAt(this.bb, a, z);
       const hip = V(this.hip.x, this.hip.y, leg.side * 0.095 * s * wm);
       const knee = solve2(hip, ankle, this.thighLen, this.shinLen, 1);
       knee.z = leg.side * 0.105 * s * wm;
-      const path = leg.path.set(hip, knee, ankle);
+      const path = leg.path.set(hip, knee, ankle, 0.062 * s * wm);
       const L1 = path.l1, L2 = path.l2, L = path.length;
       const Rt = 0.074 * s * wm, Rc = 0.057 * s * wm;
       // rayon anatomique : cuisse qui s'affine, genou, mollet bombé, cheville fine
@@ -1695,7 +2156,7 @@ export class RiderModel {
       leg.ankle.position.copy(ankle);
       leg.ankle.scale.setScalar(0.031 * s);
       leg.foot.position.copy(pedal);
-      leg.foot.rotation.z = -RiderModel.pitch(a);
+      leg.foot.rotation.z = this.standing ? 0 : -RiderModel.pitch(a);
     }
   }
 
@@ -1718,7 +2179,7 @@ export class RiderModel {
       if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
         if (!SHARED.has(o.geometry)) o.geometry.dispose();
         const m = o.material as THREE.Material & { map?: THREE.Texture | null };
-        m.map?.dispose();
+        if (m.map && !KEEP_TEX.has(m.map)) m.map.dispose();
         m.dispose();
       }
     });

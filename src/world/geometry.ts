@@ -141,6 +141,34 @@ export interface HeightGrid {
   h: Float32Array;
 }
 
+/**
+ * Plus petit rectangle orienté contenant un contour (méthode des « pieds à coulisse » :
+ * un des côtés du rectangle est toujours aligné sur un côté du contour).
+ * Renvoie les 4 coins dans l'ordre et l'aire du rectangle.
+ */
+export function orientedRect(ring: Array<[number, number]>): { corners: Array<[number, number]>; area: number } {
+  let best = { area: Infinity, corners: [] as Array<[number, number]> };
+  for (let i = 0; i < ring.length; i++) {
+    const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
+    const l = Math.hypot(bx - ax, bz - az);
+    if (l < 1e-6) continue;
+    const ux = (bx - ax) / l, uz = (bz - az) / l; // axe du côté
+    const vx = -uz, vz = ux; // axe perpendiculaire
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, z] of ring) {
+      const u = x * ux + z * uz, v = x * vx + z * vz;
+      if (u < u0) u0 = u; if (u > u1) u1 = u;
+      if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    if (area < best.area) {
+      const P = (u: number, v: number): [number, number] => [u * ux + v * vx, u * uz + v * vz];
+      best = { area, corners: [P(u0, v0), P(u1, v0), P(u1, v1), P(u0, v1)] };
+    }
+  }
+  return best;
+}
+
 /** Altitude interpolée dans la grille (bornée aux bords de la tuile). */
 export function sampleGrid(g: HeightGrid, x: number, z: number): number {
   const n = g.res;
@@ -151,6 +179,22 @@ export function sampleGrid(g: HeightGrid, x: number, z: number): number {
   const w = n + 1;
   const h00 = g.h[r * w + c], h01 = g.h[r * w + c + 1], h10 = g.h[(r + 1) * w + c], h11 = g.h[(r + 1) * w + c + 1];
   return h00 * (1 - tx) * (1 - tz) + h01 * tx * (1 - tz) + h10 * (1 - tx) * tz + h11 * tx * tz;
+}
+
+/**
+ * Altitude exacte de la surface du terrain dessiné : même découpage en triangles que
+ * buildTerrain (diagonale (r,c)→(r+1,c+1)). Sert à poser au ras du sol des objets plats
+ * (accotements) sans que le terrain ne les recouvre par endroits.
+ */
+export function sampleTerrain(g: HeightGrid, x: number, z: number): number {
+  const n = g.res;
+  const fx = Math.min(n, Math.max(0, ((x - g.x0) / g.size) * n));
+  const fz = Math.min(n, Math.max(0, ((z - g.z0) / g.size) * n));
+  const c = Math.min(n - 1, Math.floor(fx)), r = Math.min(n - 1, Math.floor(fz));
+  const tx = fx - c, tz = fz - r;
+  const w = n + 1;
+  const h00 = g.h[r * w + c], h01 = g.h[r * w + c + 1], h10 = g.h[(r + 1) * w + c], h11 = g.h[(r + 1) * w + c + 1];
+  return tz >= tx ? h00 + (h10 - h00) * tz + (h11 - h10) * tx : h00 + (h01 - h00) * tx + (h11 - h01) * tz;
 }
 
 /** Petit générateur pseudo-aléatoire déterministe (même monde à chaque chargement). */
@@ -168,6 +212,42 @@ export function hashString(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return h >>> 0;
+}
+
+/**
+ * Index spatial de polygones (emprises de bâtiments) : « ce point est-il dans un bâtiment,
+ * ou à moins de `margin` mètres d'un mur ? » (test approché sur 5 points).
+ */
+export class PolyIndex {
+  private readonly grid = new Map<number, Poly[]>();
+
+  constructor(polys: Poly[], private readonly cell = 30) {
+    for (const p of polys) {
+      for (let cx = Math.floor(p.minX / cell); cx <= Math.floor(p.maxX / cell); cx++) {
+        for (let cz = Math.floor(p.minZ / cell); cz <= Math.floor(p.maxZ / cell); cz++) {
+          const k = this.key(cx, cz);
+          let l = this.grid.get(k);
+          if (!l) this.grid.set(k, (l = []));
+          l.push(p);
+        }
+      }
+    }
+  }
+
+  private key(cx: number, cz: number): number {
+    return (cx + 50000) * 100000 + (cz + 50000);
+  }
+
+  private inside(x: number, z: number): boolean {
+    const l = this.grid.get(this.key(Math.floor(x / this.cell), Math.floor(z / this.cell)));
+    return !!l?.some((p) => x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ && pointInPoly(x, z, p));
+  }
+
+  hits(x: number, z: number, margin = 0): boolean {
+    if (this.inside(x, z)) return true;
+    if (margin <= 0) return false;
+    return this.inside(x + margin, z) || this.inside(x - margin, z) || this.inside(x, z + margin) || this.inside(x, z - margin);
+  }
 }
 
 /**

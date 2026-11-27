@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import { MeshBuilder, pointInPoly, sampleGrid, type HeightGrid, type Poly, type RGB, type SegmentIndex } from './geometry';
-import { srgbToLinear } from '../render/engine';
+import { srgbToLinear, hexLinear } from '../render/engine';
 import type { RouteIndex } from '../geo/route';
 
 /** Demi-largeur de la chaussée du parcours (m). */
@@ -76,26 +76,55 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-const WATER: RGB = [srgbToLinear(0.29), srgbToLinear(0.52), srgbToLinear(0.7)];
+const WATER: RGB = [srgbToLinear(0.24), srgbToLinear(0.55), srgbToLinear(0.8)];
 
 /** Couleur de repli sans orthophoto : herbe, roche selon la pente, neige en altitude. */
 function paletteColor(y: number, slope: number, noise: number): RGB {
-  let r = 0.42 + noise * 0.05, g = 0.6 + noise * 0.06, b = 0.3;
+  let r = 0.43 + noise * 0.05, g = 0.7 + noise * 0.06, b = 0.25;
   if (slope > 0.6) { const t = Math.min(1, (slope - 0.6) * 2); r += (0.55 - r) * t; g += (0.53 - g) * t; b += (0.5 - b) * t; }
   if (y > 2500) { const t = Math.min(1, (y - 2500) / 400); r += (0.95 - r) * t; g += (0.96 - g) * t; b += (0.98 - b) * t; }
   return [srgbToLinear(r), srgbToLinear(g), srgbToLinear(b)];
 }
 
-/** Stylisation de la couleur d'orthophoto : un peu plus saturée et lumineuse. */
-function stylize(r: number, g: number, b: number): RGB {
-  const l = 0.3 * r + 0.59 * g + 0.11 * b;
-  const sat = 1.3;
-  r = l + (r - l) * sat;
-  g = l + (g - l) * sat;
-  b = l + (b - l) * sat;
-  // les ombres des orthophotos sont très sombres : on relève les basses lumières
-  const lift = (v: number) => Math.min(1, Math.max(0, 0.06 + v * 1.08));
-  return [srgbToLinear(lift(r)), srgbToLinear(lift(g)), srgbToLinear(lift(b))];
+/**
+ * Palette « dessin animé » du sol (style low-poly à aplats) : l'orthophoto ne sert plus
+ * qu'à reconnaître ce qu'il y a par terre (pré, champ, labour, forêt, ville). Chaque face
+ * prend la couleur franche de sa catégorie au lieu de la couleur délavée de la photo.
+ */
+const GROUND = {
+  meadow: ['#6db33f', '#78bd45', '#64a838'],
+  lush: ['#4f9a33', '#579f36'],
+  forest: ['#3d7d2c', '#447f2f'],
+  crop: ['#98bb48', '#a3c04e'],
+  wheat: ['#b5c25f', '#bfc768'],
+  soil: ['#ab9466', '#b49c6c'],
+  urban: ['#cfc8b8', '#c6c0b2'],
+  rock: ['#9c9a94', '#a8a59e'],
+} as const;
+const GROUND_LIN = Object.fromEntries(
+  Object.entries(GROUND).map(([k, v]) => [k, v.map((h) => hexLinear(h))]),
+) as Record<keyof typeof GROUND, RGB[]>;
+
+/** Catégorie de sol d'après la couleur moyenne de l'orthophoto (composantes sRGB 0–1). */
+export function groundClass(r: number, g: number, b: number): keyof typeof GROUND {
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const v = max, sat = max > 0 ? (max - min) / max : 0;
+  // gris / blanc peu saturé : routes, toits, cours, carrières → ville (ou roche si sombre)
+  if (sat < 0.12) {
+    // un chaume ou un champ labouré clair reste un peu « chaud » (rouge > bleu) ; le béton,
+    // l'enrobé et les toits sont neutres ou bleutés
+    if (r - b > 0.035) return v > 0.55 ? 'wheat' : 'soil';
+    return v > 0.45 ? 'urban' : 'rock';
+  }
+  if (g >= r && g >= b) {
+    if (v < 0.3) return 'forest';
+    if (v < 0.4) return 'lush';
+    return 'meadow';
+  }
+  // dominante rouge/jaune : champs moissonnés (clairs), cultures jaunies, labours (bruns)
+  if (v > 0.62 && g > b * 1.25) return 'wheat';
+  if (g > r * 0.92) return 'crop';
+  return 'soil';
 }
 
 export function buildTerrain(g: HeightGrid, opt: TerrainOptions): THREE.BufferGeometry | null {
@@ -108,11 +137,26 @@ export function buildTerrain(g: HeightGrid, opt: TerrainOptions): THREE.BufferGe
   const faceColor = (cx: number, cz: number, y: number, slope: number, seed: number): RGB => {
     for (const p of opt.water) if (pointInPoly(cx, cz, p)) return WATER;
     if (opt.ortho) {
-      const u = Math.min(px - 1, Math.max(0, Math.floor(((cx - g.x0) / g.size) * px)));
-      const v = Math.min(px - 1, Math.max(0, Math.floor(((cz - g.z0) / g.size) * px)));
-      const i = (v * px + u) * 4;
+      // moyenne 3×3 pixels autour du centre de la face : on lisse le bruit de la photo
+      const u0 = Math.floor(((cx - g.x0) / g.size) * px), v0 = Math.floor(((cz - g.z0) / g.size) * px);
       const o = opt.ortho;
-      return stylize(o[i] / 255, o[i + 1] / 255, o[i + 2] / 255);
+      let sr = 0, sg = 0, sb = 0, nPx = 0;
+      for (let dv = -1; dv <= 1; dv++) {
+        for (let du = -1; du <= 1; du++) {
+          const u = Math.min(px - 1, Math.max(0, u0 + du)), v = Math.min(px - 1, Math.max(0, v0 + dv));
+          const i = (v * px + u) * 4;
+          sr += o[i]; sg += o[i + 1]; sb += o[i + 2]; nPx++;
+        }
+      }
+      const k = 255 * nPx;
+      let cls = groundClass(sr / k, sg / k, sb / k);
+      if (cls === 'rock' && slope < 0.5 && y < 1800) cls = 'lush'; // ombre portée sur un pré
+      if (slope > 0.9 && y > 1200) cls = 'rock';
+      const pal = GROUND_LIN[cls];
+      const base = pal[seed % pal.length];
+      // légère variation par face : les facettes restent visibles comme dans un rendu low-poly
+      const f = 0.94 + (((seed * 9301 + 49297) % 233280) / 233280) * 0.12;
+      return [base[0] * f, base[1] * f, base[2] * f];
     }
     return paletteColor(y, slope, ((seed * 9301 + 49297) % 233280) / 233280);
   };

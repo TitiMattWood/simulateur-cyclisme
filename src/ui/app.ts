@@ -4,9 +4,9 @@
  */
 import { Engine } from '../render/engine';
 import { riderPortrait } from '../render/portrait';
-import { TEAMS, teamById } from '../data/teams';
+import { TEAMS, teamById, makeMyTeam, setMyTeam, MY_TEAM_ID } from '../data/teams';
 import { HomeScene } from '../render/homeScene';
-import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance } from '../render/look';
+import { lookFromProfile, paintFor, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance, type BikePaint } from '../render/look';
 import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
@@ -31,7 +31,7 @@ import franceMap from '../data/france-map.json';
 import { APP_NAME, QUALITY, type QualityLevel } from '../config';
 import { t, setLang, type I18nKey, type Lang } from '../i18n';
 import { escapeHtml, fmtKm, fmtNum, fmtTime } from './format';
-import type { FrameId, WheelId } from '../physics/equipment';
+import { WHEELS, WHEEL_ORDER, wheelAllowed, defaultWheelFor, wheelEffect, type FrameId, type WheelId } from '../physics/equipment';
 import { CHAINRINGS, CASSETTES, TIRES, type TireId } from '../physics/gears';
 import type { RideMode, RideSetup } from '../ride/setup';
 import type { RankEntry } from '../ride/ai/peloton';
@@ -70,7 +70,9 @@ export class App {
   private ride: RideView | null = null;
   private message = '';
   /** sections du profil dépliées */
-  private pfOpen = new Set<string>(['rider', 'kit', 'bike']);
+  private pfOpen = new Set<string>(['rider', 'kit']);
+  /** coloris modifiés pendant l'édition du profil, par vélo (pas encore enregistrés) */
+  private pfPaints: Partial<Record<FrameId, BikePaint>> = {};
   /** une nouvelle version est en ligne */
   private updateReady = false;
   /** vrai pendant l'animation d'entrée dans la TV */
@@ -128,7 +130,7 @@ export class App {
     this.ui.innerHTML = `
       <div class="home">
         <header class="topbar">
-          <div class="logo">MyHomeRide<span>by Titi</span></div>
+          <div class="logo">HomeRide<span>by Titi</span></div>
           <nav class="tabs">${tabs.map((k) => `<button data-tab="${k}" class="${k === this.tab ? 'active' : ''}">${t(`tab.${k}` as I18nKey)}</button>`).join('')}</nav>
           <div class="level">
             <span class="lvl-badge">${lvl.level}</span>
@@ -160,7 +162,7 @@ export class App {
     );
     $(this.ui, '#go')?.addEventListener('click', () => this.go());
     this.bindTab();
-    this.home.setFocus(this.tab === 'profile' ? 'rider' : 'room');
+    this.home.setFocus(this.tab === 'profile' ? (this.pfOpen.has('bike') ? 'garage' : 'rider') : 'room');
   }
 
   /** Ce que lancera le bouton « C'est parti » : un parcours choisi, ou un départ en trajet libre. */
@@ -487,11 +489,16 @@ export class App {
         <img id="pf-portrait" class="portrait" src="${riderPortrait(this.engine.renderer, this.look())}" alt="">
         <label>${t('pf.team')}<select id="pf-team">
           <option value="">${t('pf.team.custom')}</option>
+          <option value="${MY_TEAM_ID}" ${p.teamId === MY_TEAM_ID ? 'selected' : ''}>${t('pf.team.mine')}</option>
+          <optgroup label="${t('pf.team.pro')}">
           ${TEAMS.map((tm) => `<option value="${tm.id}" ${tm.id === p.teamId ? 'selected' : ''}>${escapeHtml(tm.name)}</option>`).join('')}
+          </optgroup>
         </select></label>
       </div>
+      <label id="pf-myteam-row" style="${p.teamId === MY_TEAM_ID ? '' : 'display:none'}">${t('pf.myTeamName')}
+        <input type="text" id="pf-myteam" maxlength="32" value="${escapeHtml(p.myTeamName)}" placeholder="${t('pf.myTeamPh')}"></label>
       <p class="hint">${t('pf.teamHint')}</p>
-      ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
+      ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'band', 'split', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
       <div class="grid3">
         ${color('pf-j1', 'pf.jersey', p.jerseyColor)}
         ${color('pf-j2', 'pf.jersey2', p.jerseyColor2)}
@@ -510,6 +517,10 @@ export class App {
         ${check('pf-glasses', 'pf.glasses', a.glasses)}
         ${sel('pf-lens', 'pf.lens', ['dark', 'blue', 'red', 'orange', 'clear'] as const, a.lens, tr('lens'))}
       </div>
+      <div class="grid2">
+        ${sel('pf-gmodel', 'pf.glassesModel', ['shield', 'halfrim', 'wrap'] as const, a.glassesModel ?? 'shield', tr('glasses'))}
+        ${color('pf-gframe', 'pf.glassesFrame', a.glassesFrame ?? '#f2f2f2')}
+      </div>
       <div class="grid3">
         ${color('pf-shoes', 'pf.shoes', a.shoeColor)}
         ${sel('pf-sockh', 'pf.socks', ['low', 'mid', 'high'] as const, a.sockHeight, tr('socks'))}
@@ -520,12 +531,14 @@ export class App {
     const bike = `
       <div class="grid2">
         ${sel('pf-frame', 'pf.frame', ['climb', 'aero', 'gravel', 'tt', 'mtb'] as const, p.frame, tr('frame'))}
-        ${sel('pf-wheels', 'pf.wheels', ['alu', 'alu30', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
+        <label>${t('pf.wheels')}<select id="pf-wheels">${WHEEL_ORDER.map((w) =>
+          `<option value="${w}" ${w === p.wheels ? 'selected' : ''} ${wheelAllowed(p.frame, w) ? '' : 'disabled'}>${escapeHtml(`${t(`wheel.${w}` as I18nKey)} · ${fmtNum(WHEELS[w].grams, 0)} g`)}</option>`).join('')}</select></label>
       </div>
+      <div id="pf-wheelinfo" class="wheel-info">${wheelInfoHtml(p.frame, p.wheels)}</div>
       <div class="grid3">
         ${color('pf-fc', 'pf.frameColor', a.frameColor)}
         ${color('pf-fc2', 'pf.frameColor2', a.frameColor2)}
-        ${sel('pf-finish', 'pf.finish', ['gloss', 'matte'] as const, a.finish, tr('finish'))}
+        ${sel('pf-finish', 'pf.finish', ['photo', 'gloss', 'matte'] as const, a.finish, tr('finish'))}
       </div>
       <div class="grid2">
         ${check('pf-forkon', 'pf.forkColor', !!a.forkColor)}
@@ -626,6 +639,8 @@ export class App {
       helmetType: val('pf-helmet') as Appearance['helmetType'],
       glasses: chk('pf-glasses'),
       lens: val('pf-lens') as Appearance['lens'],
+      glassesModel: val('pf-gmodel') as Appearance['glassesModel'],
+      glassesFrame: val('pf-gframe'),
       shoeColor: val('pf-shoes'),
       sockColor: val('pf-sockc'),
       sockHeight: val('pf-sockh') as Appearance['sockHeight'],
@@ -641,6 +656,15 @@ export class App {
       computer: chk('pf-computer'),
       towel: chk('pf-towel'),
       forkColor: chk('pf-forkon') ? val('pf-fork') : '',
+      // le coloris saisi appartient au vélo affiché ; les autres vélos gardent le leur
+      paints: {
+        ...p.appearance.paints,
+        ...this.pfPaints,
+        [val('pf-frame') as FrameId]: {
+          frameColor: val('pf-fc'), frameColor2: val('pf-fc2'),
+          finish: val('pf-finish') as Appearance['finish'], tireWall: val('pf-tirewall') as Appearance['tireWall'],
+        },
+      },
       room: val('pf-room') as Appearance['room'],
       style: val('pf-style') as Appearance['style'],
       neonOn: chk('pf-neonon'),
@@ -653,9 +677,12 @@ export class App {
       heightCm: clamp(parseFloat(val('pf-height')), 120, 220, p.heightCm),
       ftp: Math.round(clamp(parseFloat(val('pf-ftp')), 80, 600, p.ftp)),
       teamId: val('pf-team'),
+      myTeamName: val('pf-myteam').trim(),
       hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
       frame: val('pf-frame') as FrameId,
-      wheels: val('pf-wheels') as WheelId,
+      // roues incompatibles avec le cadre (lenticulaire hors CLM, roues route sur un VTT) : on remplace
+      wheels: wheelAllowed(val('pf-frame') as FrameId, val('pf-wheels') as WheelId)
+        ? val('pf-wheels') as WheelId : defaultWheelFor(val('pf-frame') as FrameId),
       // le casque aéro/CLM et les chaussettes hautes comptent aussi dans la physique
       kit: { aeroHelmet: appearance.helmetType !== 'road', highSocks: appearance.sockHeight === 'high', overshoes: chk('pf-over') },
       jerseyColor: val('pf-j1'),
@@ -689,9 +716,13 @@ export class App {
         inp.value = e.key;
       }),
     );
-    // Choix d'une équipe : on enfile son maillot (motif, couleurs, cuissard, casque).
+    // Choix d'une équipe : on enfile son maillot (motif, couleurs, cuissard, casque) et on peint
+    // le vélo à ses couleurs. « Maillot personnalisé (sans équipe) » garde les réglages actuels.
     $<HTMLSelectElement>(this.ui, '#pf-team').addEventListener('change', (e) => {
-      const tm = teamById((e.target as HTMLSelectElement).value);
+      const id = (e.target as HTMLSelectElement).value;
+      // « Mon équipe » : on garde la tenue et le vélo actuels, que l'on règle ensuite librement
+      $(this.ui, '#pf-myteam-row').style.display = id === MY_TEAM_ID ? '' : 'none';
+      const tm = id === MY_TEAM_ID ? undefined : teamById(id);
       if (!tm) return;
       const set = (id: string, v: string) => { $<HTMLInputElement>(this.ui, `#${id}`).value = v; };
       set('pf-pattern', tm.pattern);
@@ -700,21 +731,47 @@ export class App {
       set('pf-j3', tm.jersey[2]);
       set('pf-shorts', tm.shorts);
       set('pf-hc', tm.helmet);
+      set('pf-fc', tm.frameColor);
+      set('pf-fc2', tm.frameColor2);
+      set('pf-finish', 'gloss');
     });
     // Sections repliables : on se souvient de celles qui sont ouvertes.
     this.ui.querySelectorAll<HTMLDetailsElement>('details.pf-sec').forEach((d) =>
       d.addEventListener('toggle', () => {
         if (d.open) this.pfOpen.add(d.dataset.sec!);
         else this.pfOpen.delete(d.dataset.sec!);
+        // section « Vélo » ouverte : mode configuration, le vélo complet est exposé devant le garage
+        if (d.dataset.sec === 'bike') this.home.setFocus(d.open ? 'garage' : 'rider');
       }),
     );
     // Aperçu en direct : chaque modification redessine l'avatar (au plus une fois par image).
     let pending = 0;
+    let shownFrame = this.profile.frame;
+    this.pfPaints = {};
     const preview = () => {
       if (pending) return;
       pending = requestAnimationFrame(() => {
         pending = 0;
+        // changement de vélo : on enregistre le coloris de l'ancien et on affiche celui du nouveau
+        const frameNow = $<HTMLSelectElement>(this.ui, '#pf-frame').value as FrameId;
+        if (frameNow !== shownFrame) {
+          const paint = paintFor({ paints: { ...this.profile.appearance.paints, ...this.pfPaints } }, frameNow);
+          this.pfPaints = { ...this.pfPaints, [shownFrame]: {
+            frameColor: $<HTMLInputElement>(this.ui, '#pf-fc').value, frameColor2: $<HTMLInputElement>(this.ui, '#pf-fc2').value,
+            finish: $<HTMLSelectElement>(this.ui, '#pf-finish').value as Appearance['finish'],
+            tireWall: $<HTMLSelectElement>(this.ui, '#pf-tirewall').value as Appearance['tireWall'] } };
+          $<HTMLInputElement>(this.ui, '#pf-fc').value = paint.frameColor;
+          $<HTMLInputElement>(this.ui, '#pf-fc2').value = paint.frameColor2;
+          $<HTMLSelectElement>(this.ui, '#pf-finish').value = paint.finish;
+          $<HTMLSelectElement>(this.ui, '#pf-tirewall').value = paint.tireWall;
+          shownFrame = frameNow;
+        }
         const draft = this.readProfileForm();
+        // roues proposées selon le cadre choisi, et leurs effets sur ce cadre
+        const ws = $<HTMLSelectElement>(this.ui, '#pf-wheels');
+        ws.querySelectorAll('option').forEach((o) => { o.disabled = !wheelAllowed(draft.frame, o.value as WheelId); });
+        ws.value = draft.wheels;
+        $(this.ui, '#pf-wheelinfo').innerHTML = wheelInfoHtml(draft.frame, draft.wheels);
         this.home.setLook(lookFromProfile(draft));
         const params = buildParams({ weightKg: draft.weightKg, heightCm: draft.heightCm, frame: draft.frame, wheels: draft.wheels, kit: draft.kit });
         $(this.ui, '#pf-physics').textContent = t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) });
@@ -736,7 +793,7 @@ export class App {
       this.renderHome();
     });
     $(this.ui, '#bk-export').addEventListener('click', () => {
-      downloadFile(exportBackup(this.save), safeFilename('MyHomeRide-sauvegarde', new Date(), 'json'), 'application/json');
+      downloadFile(exportBackup(this.save), safeFilename('HomeRide-sauvegarde', new Date(), 'json'), 'application/json');
     });
     $<HTMLInputElement>(this.ui, '#bk-import').addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
@@ -787,8 +844,19 @@ export class App {
     return flash;
   }
 
+  /** Déclare l'équipe créée par le joueur (couleurs de sa tenue et de son vélo) pour les courses. */
+  private syncMyTeam(): void {
+    const p = this.profile;
+    setMyTeam(p.teamId !== MY_TEAM_ID ? null : makeMyTeam({
+      name: p.myTeamName, jersey: [p.jerseyColor, p.jerseyColor2, p.appearance.jerseyColor3], pattern: p.appearance.pattern,
+      shorts: p.appearance.shortsColor, helmet: p.helmetColor, frame: p.frame,
+      frameColor: p.appearance.frameColor, frameColor2: p.appearance.frameColor2, wheels: p.wheels,
+    }));
+  }
+
   private async startRide(source: RideSource): Promise<void> {
     if (this.entering) return;
+    this.syncMyTeam();
     const flash = await this.playEnterTv();
     const title = source.kind === 'gpx' ? source.route.name : source.name;
     this.ui.innerHTML = `
@@ -985,6 +1053,16 @@ export class App {
   }
 }
 
+/** Fiche de la paire de roues choisie et gains marginaux de l'association avec le cadre. */
+function wheelInfoHtml(frame: FrameId, id: WheelId): string {
+  const w = WHEELS[id];
+  const depth = w.rearDisc ? t('pf.wheelDisc', { front: w.rimDepth })
+    : w.rimDepthRear ? `${w.rimDepth}/${w.rimDepthRear} mm` : `${w.rimDepth} mm`;
+  const fx = wheelEffect(frame, id);
+  const notes = fx.notes.map((n) => `<li class="${n === 'integration' || n === 'tt-disc' || n === 'gravel-wide-rim' ? 'pos' : 'neg'}">${t(`wheelnote.${n}` as I18nKey)}</li>`).join('');
+  return `<small>${t('pf.wheelSpec', { grams: fmtNum(w.grams, 0), depth, inner: fmtNum(w.innerWidth, 1) })}</small>${notes ? `<ul>${notes}</ul>` : ''}`;
+}
+
 /**
  * « Effet sur la route » : vitesse gagnée ou perdue à 250 W pour chaque choix de matériel,
  * sur le plat et dans une côte à 8 %, par rapport à un vélo route en alu sans accessoire aéro.
@@ -992,10 +1070,12 @@ export class App {
 function roadEffectHtml(p: Profile): string {
   const base: RiderSetup = { weightKg: p.weightKg, heightCm: p.heightCm, frame: 'climb', wheels: 'alu', kit: { aeroHelmet: false, highSocks: false, overshoes: false } };
   const speed = (su: RiderSetup, grade: number) =>
-    steadySpeed(250, { grade, headwind: 0, rho: airDensity(0), crr: crrFor(su.frame, 'asphalt'), draft: 1 }, buildParams(su)) * 3.6;
-  const rows: Array<[I18nKey, RiderSetup]> = [
+    steadySpeed(250, { grade, headwind: 0, rho: airDensity(0), crr: crrFor(su.frame, 'asphalt', buildParams(su).roll), draft: 1 }, buildParams(su)) * 3.6;
+  // les roues sont jugées sur le cadre choisi (leurs gains dépendent de l'association)
+  const onFrame: RiderSetup = { ...base, frame: p.frame };
+  const rows: Array<[I18nKey, RiderSetup, RiderSetup?]> = [
     ['effect.frame', { ...base, frame: p.frame }],
-    ['effect.wheels', { ...base, wheels: p.wheels }],
+    ['effect.wheels', { ...onFrame, wheels: p.wheels }, onFrame],
     ['effect.helmet', { ...base, kit: { ...base.kit, aeroHelmet: p.kit.aeroHelmet } }],
     ['effect.socks', { ...base, kit: { ...base.kit, highSocks: p.kit.highSocks } }],
     ['effect.overshoes', { ...base, kit: { ...base.kit, overshoes: p.kit.overshoes } }],
@@ -1008,7 +1088,8 @@ function roadEffectHtml(p: Profile): string {
   };
   return `
     <table><thead><tr><th></th><th>${t('effect.flat')}</th><th>${t('effect.climb')}</th></tr></thead><tbody>
-      ${rows.map(([k, su]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${cell(speed(su, 0) - f0)}${cell(speed(su, 0.08) - c0)}</tr>`).join('')}
+      ${rows.map(([k, su, ref]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${
+        cell(speed(su, 0) - (ref ? speed(ref, 0) : f0))}${cell(speed(su, 0.08) - (ref ? speed(ref, 0.08) : c0))}</tr>`).join('')}
     </tbody></table>
     <small>${t('effect.hint')} (km/h)</small>`;
 }

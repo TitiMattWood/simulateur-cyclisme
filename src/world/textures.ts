@@ -90,29 +90,25 @@ export function roadU(col: number, t: number): number {
  */
 export const FACADE = {
   pavillon: 0, meuliere: 1, balcons: 2, bureaux: 3, vitrine: 4, pierre: 5, bardage: 6, brique: 7, enduit: 8,
+  voletsBleus: 9, voletsVerts: 10, colombage: 11,
 } as const;
 export type FacadeStyle = keyof typeof FACADE;
 const CELLS = 4; // 4 × 4 cases de 256 px = 1024 px (puissance de 2 : réductions de texture correctes)
 const S = 256;
 
 function drawWindow(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, frame = '#f4f2ec', bars = true): void {
+  // style « peint » : encadrement clair, vitre sombre presque unie, un seul reflet discret
   g.fillStyle = frame;
-  g.fillRect(x - 5, y - 5, w + 10, h + 10);
-  const grad = g.createLinearGradient(x, y, x + w, y + h);
-  grad.addColorStop(0, '#5d7286');
-  grad.addColorStop(0.55, '#2f3e4c');
-  grad.addColorStop(1, '#46596b');
-  g.fillStyle = grad;
+  g.fillRect(x - 6, y - 6, w + 12, h + 12);
+  g.fillStyle = '#34414f';
   g.fillRect(x, y, w, h);
-  // reflet du ciel
-  g.fillStyle = 'rgba(255,255,255,0.18)';
+  g.fillStyle = 'rgba(255,255,255,0.12)';
   g.beginPath();
-  g.moveTo(x, y + h * 0.35); g.lineTo(x + w * 0.45, y); g.lineTo(x + w * 0.62, y); g.lineTo(x, y + h * 0.6);
+  g.moveTo(x, y + h * 0.3); g.lineTo(x + w * 0.35, y); g.lineTo(x + w * 0.5, y); g.lineTo(x, y + h * 0.48);
   g.fill();
   if (bars) {
     g.fillStyle = frame;
     g.fillRect(x + w / 2 - 2, y, 4, h);
-    g.fillRect(x, y + h * 0.42, w, 3);
   }
 }
 
@@ -144,19 +140,40 @@ export function facadeAtlas(): THREE.CanvasTexture {
   };
   g.fillStyle = '#f2efe9';
   g.fillRect(0, 0, c.width, c.height);
-  // 0 — pavillon : enduit, fenêtre à volets, appui
-  cell(FACADE.pavillon, (x, y) => {
+  // 0 — pavillon : enduit, fenêtre à volets, appui (et variantes de couleur de volets)
+  const pavillon = (shutter: string) => (x: number, y: number) => {
     g.fillStyle = '#ffffff';
     g.fillRect(x, y, S, S);
-    noise(g, x, y, r);
+    noise(g, x, y, r, 250, 0.03);
     drawWindow(g, x + 92, y + 70, 72, 104);
-    g.fillStyle = '#6b7f78';
-    g.fillRect(x + 54, y + 65, 30, 114);
-    g.fillRect(x + 172, y + 65, 30, 114);
-    g.fillStyle = 'rgba(0,0,0,0.25)';
-    for (let k = 0; k < 6; k++) { g.fillRect(x + 54, y + 72 + k * 18, 30, 2); g.fillRect(x + 172, y + 72 + k * 18, 30, 2); }
+    g.fillStyle = shutter;
+    g.fillRect(x + 52, y + 64, 32, 116);
+    g.fillRect(x + 172, y + 64, 32, 116);
+    g.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let k = 0; k < 6; k++) { g.fillRect(x + 52, y + 72 + k * 18, 32, 2); g.fillRect(x + 172, y + 72 + k * 18, 32, 2); }
     g.fillStyle = '#e2ddd2';
-    g.fillRect(x + 82, y + 180, 92, 8);
+    g.fillRect(x + 80, y + 182, 96, 9);
+  };
+  cell(FACADE.pavillon, pavillon('#7d8f88'));
+  cell(FACADE.voletsBleus, pavillon('#2f5fa8'));
+  cell(FACADE.voletsVerts, pavillon('#3c8a3a'));
+  // 11 — colombages : pans de bois bruns sur torchis clair (maisons anciennes)
+  cell(FACADE.colombage, (x, y) => {
+    g.fillStyle = '#fbf8f0';
+    g.fillRect(x, y, S, S);
+    g.fillStyle = '#5a3d2b';
+    for (const px of [0, 124, 250]) g.fillRect(x + px - 6, y, 12, S);
+    g.fillRect(x, y, S, 12);
+    g.fillRect(x, y + S - 14, S, 14);
+    g.fillRect(x, y + 196, S, 10);
+    g.lineWidth = 10;
+    g.strokeStyle = '#5a3d2b';
+    g.beginPath();
+    g.moveTo(x + 6, y + 196); g.lineTo(x + 56, y + 12);
+    g.moveTo(x + 244, y + 196); g.lineTo(x + 194, y + 12);
+    g.stroke();
+    drawWindow(g, x + 150, y + 60, 64, 96, '#efe9dc');
+    drawWindow(g, x + 42, y + 60, 64, 96, '#efe9dc');
   });
   // 1 — meulière : moellons ocre et bruns, joints clairs, encadrement brique
   cell(FACADE.meuliere, (x, y) => {
