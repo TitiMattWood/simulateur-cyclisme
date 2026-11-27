@@ -104,7 +104,7 @@ export class Garage {
 const mTire = new THREE.MeshStandardMaterial({ color: '#131313', roughness: 0.9 });
 const mCarbon = new THREE.MeshStandardMaterial({ color: '#1d1e20', roughness: 0.35, metalness: 0.2, side: THREE.DoubleSide });
 const mAlloy = new THREE.MeshStandardMaterial({ color: '#3a3d41', roughness: 0.4, metalness: 0.6, side: THREE.DoubleSide });
-const mDecal = new THREE.MeshStandardMaterial({ color: '#d9dde0', roughness: 0.6, side: THREE.DoubleSide });
+const mDecal = new THREE.MeshStandardMaterial({ color: '#5d6166', roughness: 0.6, side: THREE.DoubleSide });
 const mHub = new THREE.MeshStandardMaterial({ color: '#2a2c30', roughness: 0.4, metalness: 0.6 });
 const mHook = new THREE.MeshStandardMaterial({ color: '#8b949c', roughness: 0.3, metalness: 0.9 });
 

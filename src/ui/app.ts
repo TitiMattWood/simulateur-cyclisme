@@ -529,7 +529,7 @@ export class App {
       <div class="grid3">
         ${color('pf-fc', 'pf.frameColor', a.frameColor)}
         ${color('pf-fc2', 'pf.frameColor2', a.frameColor2)}
-        ${sel('pf-finish', 'pf.finish', ['gloss', 'matte'] as const, a.finish, tr('finish'))}
+        ${sel('pf-finish', 'pf.finish', ['photo', 'gloss', 'matte'] as const, a.finish, tr('finish'))}
       </div>
       <div class="grid2">
         ${check('pf-forkon', 'pf.forkColor', !!a.forkColor)}

@@ -21,7 +21,8 @@ export type Groupset = 'black' | 'silver';
 export type TireWall = 'black' | 'tan' | 'blue' | 'red' | 'white' | 'yellow' | 'green';
 export type AvatarStyle = 'smooth' | 'facet';
 export type RoomId = 'neon' | 'workshop' | 'living' | 'loft';
-export type Finish = 'gloss' | 'matte';
+/** finition du cadre ; « photo » = la photo de profil du vélo plaquée sur le cadre (en local) */
+export type Finish = 'gloss' | 'matte' | 'photo';
 
 export interface Appearance {
   /** style de modélisation de l'avatar et du vélo */
@@ -79,10 +80,10 @@ export interface BikePaint {
 
 /** Coloris d'origine des vélos (d'après les photos de référence). */
 export const DEFAULT_PAINTS: Record<FrameId, BikePaint> = {
-  climb: { frameColor: '#eef0f0', frameColor2: '#2a2c30', finish: 'gloss', tireWall: 'tan' },
-  aero: { frameColor: '#6d6e6b', frameColor2: '#b9b5a8', finish: 'matte', tireWall: 'black' },
-  gravel: { frameColor: '#b0121d', frameColor2: '#f2f2f2', finish: 'gloss', tireWall: 'tan' },
-  tt: { frameColor: '#e9e7ee', frameColor2: '#1c1d20', finish: 'gloss', tireWall: 'black' },
+  climb: { frameColor: '#eef0f0', frameColor2: '#2a2c30', finish: 'photo', tireWall: 'tan' },
+  aero: { frameColor: '#6d6e6b', frameColor2: '#b9b5a8', finish: 'photo', tireWall: 'black' },
+  gravel: { frameColor: '#b0121d', frameColor2: '#f2f2f2', finish: 'photo', tireWall: 'tan' },
+  tt: { frameColor: '#e9e7ee', frameColor2: '#1c1d20', finish: 'photo', tireWall: 'black' },
   mtb: { frameColor: '#22313f', frameColor2: '#e94b2b', finish: 'matte', tireWall: 'black' },
 };
 

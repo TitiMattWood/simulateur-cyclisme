@@ -245,6 +245,7 @@ export const fr = {
   'pf.finish': 'Finition',
   'finish.gloss': 'Brillante',
   'finish.matte': 'Mate',
+  'finish.photo': 'Photo d’origine (en local)',
   'pf.groupset': 'Groupe',
   'group.black': 'Noir',
   'group.silver': 'Argent',

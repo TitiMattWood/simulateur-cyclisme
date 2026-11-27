@@ -16,6 +16,9 @@ export interface FrameOutline {
   seatTop: Pt;
   headTop: Pt;
   headBot: Pt;
+  /** photo de référence (dossier image/ du projet, non publié) et sa taille en pixels */
+  photo: string;
+  size: Pt;
   /** mètres par pixel (horizontal, vertical) */
   kx: number;
   ky: number;
@@ -30,6 +33,7 @@ export interface FrameOutline {
 export const OUTLINES: Record<'climb' | 'aero' | 'gravel' | 'tt', FrameOutline> = {
   // Cannondale SuperSix EVO (photo de profil, image/velos/route)
   climb: {
+    photo: 'image/velos/route/Capture d’écran du 2026-11-27 11-43-53.png', size: [1246,726],
     rear: [268,450], front: [900,450], bb: [545,490],
     seatTop: [428,180], headTop: [800,135], headBot: [830,250],
     kx: 0.001611, ky: 0.001611,
@@ -41,6 +45,7 @@ export const OUTLINES: Record<'climb' | 'aero' | 'gravel' | 'tt', FrameOutline> 
   },
   // Scott Foil RC (photo légèrement de biais : échelle horizontale propre, image/velos/aero)
   aero: {
+    photo: 'image/velos/aero/Capture d’écran du 2026-11-27 11-40-14.png', size: [680,415],
     rear: [186,252], front: [484,252], bb: [300,270],
     seatTop: [248,118], headTop: [436,102], headBot: [447,152],
     kx: 0.003322, ky: 0.002888,
@@ -52,6 +57,7 @@ export const OUTLINES: Record<'climb' | 'aero' | 'gravel' | 'tt', FrameOutline> 
   },
   // Specialized Crux (image/velos/gravel)
   gravel: {
+    photo: 'image/velos/gravel/Capture d’écran du 2026-11-27 11-37-04.png', size: [1366,755],
     rear: [293,482], front: [996,482], bb: [583,512],
     seatTop: [497,207], headTop: [862,150], headBot: [895,258],
     kx: 0.001515, ky: 0.001515,
@@ -63,6 +69,7 @@ export const OUTLINES: Record<'climb' | 'aero' | 'gravel' | 'tt', FrameOutline> 
   },
   // Canyon Speedmax (image/velos/clm)
   tt: {
+    photo: 'image/velos/clm/Capture d’écran du 2026-11-27 11-46-14.png', size: [1342,906],
     rear: [272,619], front: [1026,619], bb: [575,683],
     seatTop: [478,302], headTop: [915,297], headBot: [925,375],
     kx: 0.001626, ky: 0.001626,

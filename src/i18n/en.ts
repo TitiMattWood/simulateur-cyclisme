@@ -247,6 +247,7 @@ export const en: Record<keyof typeof fr, string> = {
   'pf.finish': 'Finish',
   'finish.gloss': 'Gloss',
   'finish.matte': 'Matte',
+  'finish.photo': 'Original photo (local)',
   'pf.groupset': 'Groupset',
   'group.black': 'Black',
   'group.silver': 'Silver',
