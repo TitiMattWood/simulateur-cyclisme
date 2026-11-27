@@ -18,11 +18,17 @@ import { neonCave } from './rooms/neonCave';
 import { workshop } from './rooms/workshop';
 import { livingRoom } from './rooms/livingRoom';
 import { industrialLoft } from './rooms/industrialLoft';
+import { Garage } from './garage';
 
 /** Point regardé par la caméra (milieu du cycliste). */
 const RIDER_TARGET = new THREE.Vector3(0.5, 0.95, 0);
 
-type Focus = 'room' | 'rider';
+/** Cadrage : pièce entière, gros plan sur le cycliste, ou garage (configuration du vélo). */
+type Focus = 'room' | 'rider' | 'garage';
+
+/** Caméra du mode garage : le vélo complet au premier plan, les vélos et roues rangés derrière. */
+const GARAGE_POS = new THREE.Vector3(2.3, 1.8, 3.7);
+const GARAGE_TARGET = new THREE.Vector3(-1.05, 0.9, -0.5);
 
 /** Mesures affichées sur la TV de l'accueil. */
 export interface TvLive {
@@ -64,6 +70,12 @@ export class HomeScene implements View {
   /** réglage d'exposition propre au décor (lu par le moteur) */
   exposure = 1;
   private rider: RiderModel;
+  /** vélo complet (deux roues, sans cycliste) exposé en mode configuration */
+  private showBike: RiderModel | null = null;
+  private look: RiderLook;
+  private garage = new Garage();
+  /** 0 = vue normale, 1 = vue garage (interpolé en douceur) */
+  private gz = 0;
   private room!: RoomSetup;
   private roomId: RoomId | null = null;
   private roomStyle: RiderLook['style'] | null = null;
@@ -102,6 +114,9 @@ export class HomeScene implements View {
     this.scene.add(this.screen);
     this.rider = new RiderModel(look, { trainer: true });
     this.scene.add(this.rider.root);
+    this.look = look;
+    this.garage.update(look);
+    this.scene.add(this.garage.group);
     this.setRoom(look.room ?? 'neon', look.style, { color: look.neonColor, on: look.neonOn });
     this.drawTv(0);
     this.update(0);
@@ -143,12 +158,37 @@ export class HomeScene implements View {
     this.rider.dispose();
     this.rider = new RiderModel(look, { trainer: true });
     this.scene.add(this.rider.root);
+    this.look = look;
+    this.garage.update(look);
+    this.dropShowBike();
+    this.applyFocus();
     this.setRoom(look.room ?? 'neon', look.style, { color: look.neonColor, on: look.neonOn });
+  }
+
+  private dropShowBike(): void {
+    if (!this.showBike) return;
+    this.scene.remove(this.showBike.root);
+    this.showBike.dispose();
+    this.showBike = null;
+  }
+
+  /** Mode garage : le cycliste descend du home trainer, le vélo complet est posé au sol. */
+  private applyFocus(): void {
+    const garage = this.focus === 'garage';
+    if (garage && !this.showBike) {
+      this.showBike = new RiderModel(this.look, { bikeOnly: true });
+      this.showBike.root.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
+      this.scene.add(this.showBike.root);
+    }
+    if (this.showBike) this.showBike.root.visible = garage;
+    this.rider.root.visible = !garage;
   }
 
   /** Cadrage : pièce entière, ou gros plan sur le cycliste (onglet Profil). */
   setFocus(f: Focus): void {
+    if (f === this.focus) return;
     this.focus = f;
+    this.applyFocus();
   }
 
   resize(w: number, h: number): void {
@@ -267,10 +307,16 @@ export class HomeScene implements View {
       this.tvClock = 0;
     }
     this.zoom += ((this.focus === 'rider' ? 1 : 0) - this.zoom) * (1 - Math.exp(-dt * 2.5));
+    this.gz += ((this.focus === 'garage' ? 1 : 0) - this.gz) * (1 - Math.exp(-dt * 2.5));
 
     const cam = this.camera;
     const pos = new THREE.Vector3(), target = new THREE.Vector3();
     this.orbit(pos, target);
+    if (this.gz > 0.001) {
+      const g = smooth(this.gz);
+      pos.lerp(GARAGE_POS, g);
+      target.lerp(GARAGE_TARGET, g);
+    }
     // caméra libre : mélange doux entre le mouvement automatique et la position choisie à la souris
     const m = this.manual;
     m.idle += dt;

@@ -40,10 +40,10 @@ export function workshop(style: RiderLook['style'] = 'smooth', neon: NeonSetting
   aoEdge(g, V(3.3, 0, -3), V(3.3, 0, 4.4), V(-1, 0, 0));
   aoEdge(g, V(-3.5, 0, -3), V(-3.5, 0, 4.4), V(1, 0, 0));
 
-  // ----- Porte de garage sectionnelle (mur arrière)
+  // ----- Porte de garage sectionnelle (mur arrière, côté caméra : la gauche du mur sert au garage à vélos)
   const door = std('#e9eaec', 0.45, 0.3);
-  for (let k = 0; k < 6; k++) box(g, door, -3.49, 0.25 + k * 0.42, 0.9, 0.04, 0.4, 2.8, false);
-  box(g, std('#9aa0a6', 0.4, 0.6), -3.47, 1.4, 0.9, 0.06, 2.6, 0.06, false);
+  for (let k = 0; k < 6; k++) box(g, door, -3.49, 0.25 + k * 0.42, 2.85, 0.04, 0.4, 2.6, false);
+  box(g, std('#9aa0a6', 0.4, 0.6), -3.47, 1.4, 2.85, 0.06, 2.6, 0.06, false);
 
   // ----- Établi, panneau à outils et servante
   const wood = std('#b88a5a', 0.6);

@@ -77,7 +77,7 @@ export function industrialLoft(neon: NeonSetting = { color: '#ff4fa8', on: true 
   box(g, leather, -3.15, 0.65, 2.2, 0.2, 0.6, 0.8);
   for (const z of [1.85, 2.55]) box(g, leather, -2.85, 0.45, z, 0.8, 0.3, 0.12);
   plant(g, 1.6, -2.55, 1.2, '#2f3134', 11);
-  plant(g, -3.0, 0.9, 0.9, '#2f3134', 14);
+  plant(g, -3.0, 3.4, 0.9, '#2f3134', 14);
 
   // ----- TV sur console en acier et bois
   box(g, wood, 3.05, 0.55, 0, 0.45, 0.05, 2.0);

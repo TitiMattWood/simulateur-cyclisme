@@ -294,8 +294,12 @@ interface FrameGeo {
   deep: number;
   /** hauteur où les haubans rejoignent le tube de selle (fraction, haubans plongeants) */
   stayAt: number;
-  /** silhouette particulière : 'foil' (aéro façon Scott Foil RC), 'rcrg' (gravel façon Van Rysel RCR-G) */
-  shape?: 'foil' | 'rcrg';
+  /**
+   * silhouette particulière : 'foil' (aéro façon Scott Foil RC), 'rcrg' (gravel façon Van Rysel
+   * RCR-G), 'crux' (gravel léger à tubes ronds façon Specialized Crux), 'speedmax' (CLM massif
+   * façon Canyon Speedmax / Scott Plasma), 'evo' (route façon Cannondale SuperSix EVO)
+   */
+  shape?: 'foil' | 'rcrg' | 'crux' | 'speedmax' | 'evo';
   /** angle du buste au-dessus de l'horizontale (degrés) */
   torso: number;
   hands: Hands;
@@ -311,13 +315,13 @@ interface FrameGeo {
 
 const GEO: Record<FrameId, FrameGeo> = {
   // Route « grimpeur » (esprit Scott Addict RC) : tubes fins à profil tronqué, haubans plongeants.
-  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.26, 0.78], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.7, torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
+  climb: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.27, 0.765], headTop: [0.85, 0.79], headBot: [0.895, 0.635], tube: 0.0155, deep: 1.6, stayAt: 0.6, shape: 'evo', torso: 41, hands: 'hoods', stemLen: 0.11, stemAngle: -8, spacer: 0.02, saddleFwd: 0, suspension: false },
   // Route aéro (esprit Scott Foil) : tubes très profonds, haubans bas, avant plus bas.
   aero: { R: 0.335, tire: 0.0135, wheelbase: 0.99, bb: [0.41, 0.27], seatTop: [0.285, 0.735], headTop: [0.85, 0.8], headBot: [0.899, 0.615], tube: 0.0135, deep: 2.6, stayAt: 0.42, shape: 'foil', torso: 37, hands: 'hoods', stemLen: 0.115, stemAngle: -10, spacer: 0.01, saddleFwd: 0.005, suspension: false },
   // Gravel (esprit Scott Addict Gravel) : pneus larges, cintre évasé, avant plus haut.
-  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.3, 0.7], headTop: [0.882, 0.8], headBot: [0.922, 0.655], tube: 0.0165, deep: 1.6, stayAt: 0.5, shape: 'rcrg', torso: 45, hands: 'flare', stemLen: 0.095, stemAngle: -8, spacer: 0.012, saddleFwd: 0, suspension: false },
+  gravel: { R: 0.35, tire: 0.02, wheelbase: 1.03, bb: [0.43, 0.28], seatTop: [0.31, 0.73], headTop: [0.882, 0.81], headBot: [0.922, 0.655], tube: 0.0155, deep: 1.1, stayAt: 0.93, shape: 'crux', torso: 45, hands: 'flare', stemLen: 0.095, stemAngle: -8, spacer: 0.012, saddleFwd: 0, suspension: false },
   // Contre-la-montre (esprit Scott Plasma) : avant massif et intégré, prolongateurs.
-  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.55, torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
+  tt: { R: 0.335, tire: 0.0125, wheelbase: 1.0, bb: [0.42, 0.27], seatTop: [0.31, 0.74], headTop: [0.86, 0.71], headBot: [0.89, 0.6], tube: 0.013, deep: 3.0, stayAt: 0.42, shape: 'speedmax', torso: 13, hands: 'tt', stemLen: 0.1, stemAngle: 0, spacer: 0, saddleFwd: 0.035, suspension: false },
   // VTT tout-suspendu 29" (esprit Scott Spark) : direction très couchée (65,5°), fourche longue,
   // tube horizontal plongeant, potence courte, cintre large relevé, amortisseur sous le tube horizontal.
   mtb: { R: 0.37, tire: 0.029, wheelbase: 1.18, bb: [0.44, 0.34], seatTop: [0.33, 0.75], headTop: [0.954, 0.97], headBot: [1.0, 0.87], tube: 0.021, deep: 1.35, stayAt: 0.74, torso: 50, hands: 'flat', stemLen: 0.05, stemAngle: 0, spacer: 0.02, saddleFwd: 0, suspension: true },
@@ -941,6 +945,37 @@ export class RiderModel {
       const ht = new THREE.Mesh(AIRFOIL, mFrame);
       place(ht, headBot.clone().add(V(0.004, -0.06)), headTop.clone().add(V(-0.004, 0.012)), 0.02, 1.75);
       bike.add(ht);
+    } else if (geo.shape === 'speedmax') {
+      // CLM : tout est profond. Tube de selle qui épouse la roue arrière, tube diagonal très
+      // haut, tube horizontal qui s'évase vers une douille massive fondue dans la fourche.
+      const bow = bb.clone().lerp(seatTop, 0.4).add(V(0.04, 0));
+      ttaper(bb, bow, 0.016, 3.2, 0.015, 3.4);
+      ttaper(bow, seatTop, 0.015, 3.4, 0.0135, 2.6);
+      bike.add(blob(mFrame, bow, 0.05, 0.022, 0.015));
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, 0.017, 2.8, 0.02, 3.6);
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.02, -0.03)), 0.0125, 2.2, 0.018, 3.0);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.006, -0.075)), headTop.clone().add(V(-0.004, 0.01)), 0.022, 2.8);
+      bike.add(ht);
+      // capot avant : la douille, le tube horizontal et la fourche ne font qu'un bloc
+      bike.add(blob(mFrame, dtEnd.clone().add(V(-0.01, -0.005)), 0.065, 0.045, 0.022));
+      bike.add(blob(mFrame, headTop.clone().add(V(-0.04, -0.03)), 0.06, 0.03, 0.02));
+    } else if (geo.shape === 'crux') {
+      // gravel léger : tubes ronds et fins, tube horizontal légèrement plongeant, douille conique
+      ftube(bb, seatTop, T * 1.0, 1);
+      ftube(bb.clone().add(V(0.008, 0.008)), dtEnd, T * 1.45, 1.1);
+      ftube(seatTop.clone().add(V(-0.008, -0.005)), headTop.clone().add(V(-0.012, -0.022)), T * 0.92, 1);
+      const ht = new THREE.Mesh(HEAD_TUBE, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.035)), headTop.clone().add(V(-0.004, 0.012)), T * 1.7, 1);
+      bike.add(ht);
+    } else if (geo.shape === 'evo') {
+      // route moderne : tubes à profil tronqué, tube diagonal large, tube horizontal plongeant
+      ttaper(bb, seatTop, T * 1.05, 1.9, T * 0.95, 1.6);
+      ttaper(bb.clone().add(V(0.01, 0.01)), dtEnd, T * 1.45, 1.8, T * 1.55, 2.2);
+      ttaper(seatTop.clone().add(V(-0.01, 0)), headTop.clone().add(V(-0.012, -0.022)), T * 0.9, 1.4, T * 1.0, 1.8);
+      const ht = new THREE.Mesh(AIRFOIL, mFrame);
+      place(ht, headBot.clone().add(V(0.004, -0.045)), headTop.clone().add(V(-0.004, 0.012)), T * 1.6, 1.7);
+      bike.add(ht);
     } else if (geo.shape === 'rcrg') {
       // RCR-G : tube de selle fin, tube diagonal profond qui s'élargit vers l'avant,
       // tube horizontal qui monte franchement vers une douille haute.
@@ -968,6 +1003,9 @@ export class RiderModel {
       for (const g of [DECAL_R, DECAL_L]) {
         const m = new THREE.Mesh(g, mWord);
         if (geo.shape === 'foil') place(m, bb, dtEnd, 0.0175, 2.0);
+        else if (geo.shape === 'speedmax') place(m, bb, dtEnd, 0.0195, 3.0);
+        else if (geo.shape === 'crux') place(m, bb, dtEnd, T * 1.47, 1.15);
+        else if (geo.shape === 'evo') place(m, bb, dtEnd, T * 1.52, 2.0);
         else if (geo.shape === 'rcrg') place(m, bb, dtEnd, T * 1.45, 2.2);
         else place(m, bb, dtEnd, T * 1.4, D * 0.95);
         bike.add(m);
@@ -975,6 +1013,7 @@ export class RiderModel {
     }
     // liseré de couleur 2 sur le haut du tube de selle et le bas de la fourche
     if (!geo.shape) ftube(bb.clone().lerp(seatTop, 0.88), seatTop, T * 1.04, D * 1.02, mDecal);
+    else if (geo.shape === 'evo') ttaper(bb.clone().lerp(seatTop, 0.86), seatTop, T * 1.0, 1.65, T * 0.97, 1.62, mDecal);
 
     // triangle arrière
     const pivot = bb.clone().add(V(-0.035, 0.08));
@@ -983,7 +1022,8 @@ export class RiderModel {
       // bases (pour le VTT : bras oscillant jusqu'au pivot principal)
       ftube(V(0, R, z), geo.suspension ? V(pivot.x, pivot.y, z * 0.6) : V(bb.x - 0.03, bb.y + 0.005, z * 0.5), T * (geo.suspension ? 0.85 : 0.68), 1.25);
       // haubans plongeants
-      ftube(V(0.005, R + 0.005, z), V(stayTop.x - (geo.suspension ? 0.05 : 0), stayTop.y, z * 0.32), T * 0.55, Math.min(D, 1.5));
+      const stayR = geo.shape === 'speedmax' ? T * 0.7 : geo.shape === 'crux' ? T * 0.5 : T * 0.55;
+      ftube(V(0.005, R + 0.005, z), V(stayTop.x - (geo.suspension ? 0.05 : 0), stayTop.y, z * 0.32), stayR, geo.shape === 'speedmax' ? 2.2 : geo.shape === 'crux' ? 1 : Math.min(D, 1.5));
       bike.add(box(mFrame, V(0.005, R, z * 1.02), 0.04, 0.03, 0.008)); // patte de roue
     }
     if (geo.suspension) {
@@ -1021,11 +1061,13 @@ export class RiderModel {
       const mFork = look.forkColor ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : mFrame;
       const crown = V(headBot.x + 0.004, headBot.y - 0.04);
       if (geo.shape === 'foil') bike.add(blob(mFork, crown.clone().add(V(0.004, -0.004)), 0.036, 0.026, 0.055));
+      else if (geo.shape === 'speedmax') bike.add(blob(mFork, crown.clone().add(V(0.01, 0)), 0.06, 0.03, 0.06));
       else bike.add(blob(mFork, crown, 0.026, 0.018, 0.05));
-      const slim = geo.shape === 'rcrg';
+      const slim = geo.shape === 'rcrg' || geo.shape === 'crux';
+      const deepFork = geo.shape === 'speedmax' ? 3.2 : geo.shape === 'foil' ? 2.6 : slim ? 1.75 : 2.0;
       for (const z of [-0.055, 0.055]) {
         // fourreaux fins qui s'affinent vers l'axe (≈ 2 cm × 3,5 cm sous le té sur le gravel)
-        const m = new THREE.Mesh(taperedPrism(slim ? 0.0085 : T * 0.75, slim ? 1.6 : 2.0, slim ? 0.0105 : T * 1.05, slim ? 1.75 : geo.shape === 'foil' ? 2.6 : 2.0, FACET), mFork);
+        const m = new THREE.Mesh(taperedPrism(slim ? 0.0085 : T * 0.75, slim ? 1.6 : 2.0, slim ? 0.0105 : T * 1.05, deepFork, FACET), mFork);
         place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.75), 1, 1);
         bike.add(m);
       }
@@ -1061,9 +1103,17 @@ export class RiderModel {
       tube(mBlack, seatTop, mid, 0.017);
       tube(shiny('#2b2d30', 70, '#888888'), mid, postEnd, 0.0145);
     } else {
-      if (geo.shape === 'rcrg') tube(mBlack, seatTop, postEnd, 0.0135); // tige ronde et fine
+      if (geo.shape === 'rcrg' || geo.shape === 'crux') tube(mBlack, seatTop, postEnd, 0.0135); // tige ronde et fine
+      else if (geo.shape === 'speedmax') ttaper(seatTop, postEnd, 0.013, 2.6, 0.012, 2.2); // tige CLM profonde
       else if (geo.shape === 'foil') ttaper(seatTop, postEnd, 0.012, 1.9, 0.0115, 1.7); // tige aéro profonde
       else ftube(seatTop, postEnd, T * 0.95, Math.min(D, 1.9), D > 2 ? mFrame : mBlack); // tige profilée
+    }
+    if (geo.shape === 'speedmax') {
+      // CLM : bidon couché derrière la selle (sur son support) et sacoche « bento » sur le tube horizontal
+      const cage = saddle.clone().add(V(-0.14, -0.045));
+      tube(mBlack, saddle.clone().add(V(-0.06, -0.01)), cage, 0.006);
+      tube(mBlack, cage.clone().add(V(-0.055, -0.01)), cage.clone().add(V(0.045, 0.0)), 0.033);
+      bike.add(box(mBlack, headTop.clone().add(V(-0.1, 0.012)), 0.11, 0.04, 0.045));
     }
     // selle à bec court (rembourrage + coque)
     bike.add(blob(mSaddle, saddle.clone().add(V(-0.04, 0.013)), 0.07, 0.019, 0.072));

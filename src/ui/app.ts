@@ -70,7 +70,7 @@ export class App {
   private ride: RideView | null = null;
   private message = '';
   /** sections du profil dépliées */
-  private pfOpen = new Set<string>(['rider', 'kit', 'bike']);
+  private pfOpen = new Set<string>(['rider', 'kit']);
   /** une nouvelle version est en ligne */
   private updateReady = false;
   /** vrai pendant l'animation d'entrée dans la TV */
@@ -160,7 +160,7 @@ export class App {
     );
     $(this.ui, '#go')?.addEventListener('click', () => this.go());
     this.bindTab();
-    this.home.setFocus(this.tab === 'profile' ? 'rider' : 'room');
+    this.home.setFocus(this.tab === 'profile' ? (this.pfOpen.has('bike') ? 'garage' : 'rider') : 'room');
   }
 
   /** Ce que lancera le bouton « C'est parti » : un parcours choisi, ou un départ en trajet libre. */
@@ -710,6 +710,8 @@ export class App {
       d.addEventListener('toggle', () => {
         if (d.open) this.pfOpen.add(d.dataset.sec!);
         else this.pfOpen.delete(d.dataset.sec!);
+        // section « Vélo » ouverte : mode configuration, le vélo complet est exposé devant le garage
+        if (d.dataset.sec === 'bike') this.home.setFocus(d.open ? 'garage' : 'rider');
       }),
     );
     // Aperçu en direct : chaque modification redessine l'avatar (au plus une fois par image).
