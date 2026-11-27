@@ -19,6 +19,7 @@ import type { Track } from '../geo/track';
 import { fetchDemGrid, fetchOrtho, fetchWfs, type BBox, type GeoFeature } from '../geo/ign';
 import { buildTerrain, flattenUnderRoute, flattenUnderRoads, ROAD_HALF_WIDTH } from './terrain';
 import { buildBuildings, buildVegetation, buildStreets } from './features';
+import { buildCountryside } from './countryside';
 import { geoToPolys, geoToLines, sampleGrid, SegmentIndex, type HeightGrid } from './geometry';
 import { ROAD_CLASSES, ROAD_PROPS, roadWidth } from './roads';
 
@@ -158,6 +159,11 @@ export class WorldStreamer {
     const near = this.wanted('near', this.q.nearRadius);
     const far = this.wanted('far', this.q.farRadius);
     for (const [key, tile] of this.tiles) {
+      // herbes hautes : invisibles de loin, on ne les dessine que sur les tuiles voisines
+      if (tile.state === 'built') {
+        const grassOn = this.distTo(tile) < 250;
+        tile.group?.traverse((o) => { if (o.userData.kind === 'grass') o.visible = grassOn; });
+      }
       const keep = tile.level === 'near' ? near.has(key) || this.distTo(tile) < this.q.nearRadius * 1.5
         : far.has(key) || this.distTo(tile) < this.q.farRadius * 1.3;
       if (!keep && tile.state !== 'loading') this.dispose(tile);
@@ -297,7 +303,20 @@ export class WorldStreamer {
         if (hit && hit.dist < hit.data.halfW + 2.5) return true;
         return !!this.index?.nearest(x, z, ROAD_HALF_WIDTH + 4);
       };
-      const veg = buildVegetation(feats.veg, proj, grid, bounds, avoid, this.q.maxTrees, tile.i * 7919 + tile.j * 104729);
+      // décor de bord de route (herbes, clôtures, poteaux, arbres isolés), tuiles proches seulement
+      const onRoad = (x: number, z: number, margin: number) => {
+        const hit = ri?.nearest(x, z, 12 + margin, (d) => d.halfW);
+        if (hit && hit.dist < hit.data.halfW + margin) return true;
+        return !!this.index?.nearest(x, z, ROAD_HALF_WIDTH + margin);
+      };
+      const side = tile.level === 'near'
+        ? buildCountryside({
+          roads: feats.roads, buildings: feats.bat, water, proj, grid, bounds, onRoad,
+          density: this.q.roadside, seed: tile.i * 15485863 + tile.j * 32452843,
+        })
+        : null;
+      if (side) group.add(side.group);
+      const veg = buildVegetation(feats.veg, proj, grid, bounds, avoid, this.q.maxTrees, tile.i * 7919 + tile.j * 104729, side?.trees);
       if (veg) group.add(veg);
     }
     tile.group = group;

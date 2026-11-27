@@ -301,8 +301,21 @@ const VEG: Record<string, VegRule> = {
   'Vigne': { kind: 'bush', spacing: 2.6, scale: 0.55 },
 };
 
-/** Géométries partagées par toutes les tuiles (créées une seule fois). */
-let treeGeos: Record<TreeKind, THREE.BufferGeometry> | null = null;
+/** Un arbre à planter : position au sol, espèce, taille. */
+export interface TreePlacement {
+  x: number;
+  z: number;
+  kind: TreeKind;
+  scale: number;
+}
+export type { TreeKind };
+
+/**
+ * Géométries partagées par toutes les tuiles (créées une seule fois). Chaque espèce a un tronc
+ * (couleur fixe) et un feuillage blanc teinté arbre par arbre (couleur d'instance) : on peut
+ * ainsi mélanger verts et couleurs d'automne sans multiplier les maillages.
+ */
+let treeGeos: Record<TreeKind, { trunk: THREE.BufferGeometry | null; crown: THREE.BufferGeometry }> | null = null;
 
 function colorize(geo: THREE.BufferGeometry, hex: string): THREE.BufferGeometry {
   const g = geo.index ? geo.toNonIndexed() : geo;
@@ -328,30 +341,99 @@ function mergeSimple(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
   return g;
 }
 
-function getTreeGeos(): Record<TreeKind, THREE.BufferGeometry> {
+/** Boule de feuillage facettée, légèrement bosselée pour ne pas paraître trop géométrique. */
+function crownBlob(radius: number, seed: number): THREE.BufferGeometry {
+  const g = new THREE.IcosahedronGeometry(radius, 1);
+  const pos = g.getAttribute('position');
+  const r = rng(seed);
+  // les sommets partagés gardent le même décalage (clé = position arrondie)
+  const bump = new Map<string, number>();
+  for (let i = 0; i < pos.count; i++) {
+    const key = `${pos.getX(i).toFixed(2)},${pos.getY(i).toFixed(2)},${pos.getZ(i).toFixed(2)}`;
+    let k = bump.get(key);
+    if (k === undefined) { k = 0.9 + r() * 0.2; bump.set(key, k); }
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k, pos.getZ(i) * k);
+  }
+  return g;
+}
+
+function getTreeGeos(): NonNullable<typeof treeGeos> {
   if (treeGeos) return treeGeos;
-  const trunk = (h: number) => colorize(new THREE.CylinderGeometry(0.18, 0.28, h, 5).translate(0, h / 2, 0), '#6b4f3a');
-  const leaf = mergeSimple([
-    trunk(3),
-    colorize(new THREE.IcosahedronGeometry(2.6, 0).scale(1, 1.15, 1).translate(0, 5, 0), '#5f8f3e'),
-    colorize(new THREE.IcosahedronGeometry(1.7, 0).translate(0.9, 6.6, 0.4), '#6e9c45'),
-  ]);
-  const conifer = mergeSimple([
-    trunk(2),
-    colorize(new THREE.ConeGeometry(2.3, 5, 6).translate(0, 4.2, 0), '#2f5e3a'),
-    colorize(new THREE.ConeGeometry(1.7, 4, 6).translate(0, 7, 0), '#356a40'),
-  ]);
-  const bush = mergeSimple([colorize(new THREE.IcosahedronGeometry(1, 0).scale(1, 0.8, 1).translate(0, 0.7, 0), '#5d7f37')]);
+  const trunk = (h: number, r: number) => colorize(new THREE.CylinderGeometry(r * 0.65, r, h, 6).translate(0, h / 2, 0), '#6e4e36');
+  const white = '#ffffff';
+  // feuillu : grosse couronne ronde posée sur un tronc court (silhouette « sucette » low-poly)
+  const leaf = {
+    trunk: trunk(3.4, 0.32),
+    crown: colorize(crownBlob(3.3, 11).scale(1, 1.1, 1).translate(0, 5.8, 0), white),
+  };
+  // conifère : trois étages de cônes à 7 pans
+  const conifer = {
+    trunk: trunk(1.6, 0.28),
+    crown: mergeSimple([
+      colorize(new THREE.ConeGeometry(2.6, 4.2, 7).translate(0, 3.4, 0), white),
+      colorize(new THREE.ConeGeometry(2.0, 3.6, 7).translate(0, 5.5, 0), white),
+      colorize(new THREE.ConeGeometry(1.3, 3.0, 7).translate(0, 7.5, 0), white),
+    ]),
+  };
+  const bush = { trunk: null, crown: colorize(crownBlob(1.25, 23).scale(1, 0.8, 1).translate(0, 0.85, 0), white) };
   treeGeos = { leaf, conifer, bush };
   return treeGeos;
 }
 
-const treeMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+/** Teintes de feuillage (sRGB) : verts francs et, pour une partie des feuillus, l'automne. */
+const LEAF_GREENS = ['#5aa83a', '#4c9a30', '#6cb544', '#3f8a2c', '#79bf47'];
+const LEAF_AUTUMN = ['#e08a2a', '#e3b23c', '#c95a2c', '#b9c23e', '#d7702a'];
+const CONIFER_GREENS = ['#2f6e3a', '#3a7a40', '#2b6334', '#357238'];
+const BUSH_GREENS = ['#5c9e36', '#6aa83c', '#4f8f2f'];
+/** part des feuillus aux couleurs d'automne */
+const AUTUMN_SHARE = 0.22;
 
-/** Place les arbres dans les zones de végétation de la tuile (instanciation : 1 appel GPU par espèce). */
+const treeMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, flatShading: true });
+
+function foliageColor(kind: TreeKind, r: () => number): THREE.Color {
+  const list = kind === 'conifer' ? CONIFER_GREENS
+    : kind === 'bush' ? BUSH_GREENS
+    : r() < AUTUMN_SHARE ? LEAF_AUTUMN : LEAF_GREENS;
+  return new THREE.Color(list[Math.floor(r() * list.length) % list.length]);
+}
+
+/** Plante une liste d'arbres (instanciation : 2 appels GPU par espèce, tronc + feuillage). */
+export function plantTrees(list: TreePlacement[], grid: HeightGrid, seed: number): THREE.Group | null {
+  if (!list.length) return null;
+  const r = rng(seed);
+  const geos = getTreeGeos();
+  const byKind: Record<TreeKind, TreePlacement[]> = { leaf: [], conifer: [], bush: [] };
+  for (const t of list) byKind[t.kind].push(t);
+  const group = new THREE.Group();
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  (Object.keys(byKind) as TreeKind[]).forEach((k) => {
+    const items = byKind[k];
+    if (!items.length) return;
+    const crown = new THREE.InstancedMesh(geos[k].crown, treeMaterial, items.length);
+    const trunk = geos[k].trunk ? new THREE.InstancedMesh(geos[k].trunk!, treeMaterial, items.length) : null;
+    items.forEach((t, i) => {
+      q.setFromAxisAngle(yAxis, r() * Math.PI * 2);
+      s.set(t.scale, t.scale * (0.88 + r() * 0.3), t.scale);
+      v.set(t.x, sampleGrid(grid, t.x, t.z) - 0.2, t.z);
+      m.compose(v, q, s);
+      crown.setMatrixAt(i, m);
+      crown.setColorAt(i, foliageColor(k, r));
+      trunk?.setMatrixAt(i, m);
+    });
+    for (const mesh of trunk ? [crown, trunk] : [crown]) {
+      mesh.castShadow = true;
+      mesh.computeBoundingSphere();
+      group.add(mesh);
+    }
+  });
+  return group;
+}
+
+/** Place les arbres dans les zones de végétation de la tuile (+ arbres supplémentaires fournis). */
 export function buildVegetation(
   feats: GeoFeature[], proj: LocalProjection, grid: HeightGrid, bounds: TileBounds,
-  avoid: Avoid | null, maxTrees: number, seed: number,
+  avoid: Avoid | null, maxTrees: number, seed: number, extra: TreePlacement[] = [],
 ): THREE.Group | null {
   const zones: Array<{ poly: Poly; rule: VegRule }> = [];
   let estimate = 0;
@@ -366,50 +448,28 @@ export function buildVegetation(
       estimate += Math.min(Math.abs(polyArea(poly.outer)), (ix1 - ix0) * (iz1 - iz0)) / (rule.spacing * rule.spacing);
     }
   }
-  if (!zones.length) return null;
+  const budget = Math.max(0, maxTrees - Math.min(extra.length, Math.floor(maxTrees * 0.5)));
   // Si la tuile est très boisée, on espace un peu les arbres pour rester fluide.
-  const density = estimate > maxTrees ? Math.sqrt(estimate / maxTrees) : 1;
+  const density = estimate > budget ? Math.sqrt(estimate / Math.max(1, budget)) : 1;
   const r = rng(seed);
-  const items: Record<TreeKind, THREE.Matrix4[]> = { leaf: [], conifer: [], bush: [] };
-  const colors: Record<TreeKind, THREE.Color[]> = { leaf: [], conifer: [], bush: [] };
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3();
-  const yAxis = new THREE.Vector3(0, 1, 0);
-  let count = 0;
+  // les arbres de bord de route ne prennent pas plus de la moitié du budget
+  const list: TreePlacement[] = extra.slice(0, Math.floor(maxTrees * 0.5));
   for (const { poly, rule } of zones) {
     const sp = rule.spacing * density;
     const ix0 = Math.max(poly.minX, bounds.x0), ix1 = Math.min(poly.maxX, bounds.x1);
     const iz0 = Math.max(poly.minZ, bounds.z0), iz1 = Math.min(poly.maxZ, bounds.z1);
     for (let z = iz0 + sp / 2; z < iz1; z += sp) {
       for (let x = ix0 + sp / 2; x < ix1; x += sp) {
-        if (count >= maxTrees) break;
+        if (list.length >= maxTrees) break;
         const px = x + (r() - 0.5) * sp * 0.8, pz = z + (r() - 0.5) * sp * 0.8;
         if (!pointInPoly(px, pz, poly)) continue;
         if (avoid && avoid(px, pz)) continue; // pas d'arbre sur la chaussée
         const kind: TreeKind = rule.kind === 'mixed' ? (r() < 0.5 ? 'leaf' : 'conifer') : rule.kind;
-        const sc = rule.scale * (0.75 + r() * 0.6);
-        q.setFromAxisAngle(yAxis, r() * Math.PI * 2);
-        s.set(sc, sc * (0.85 + r() * 0.35), sc);
-        v.set(px, sampleGrid(grid, px, pz) - 0.2, pz);
-        items[kind].push(m.compose(v, q, s).clone());
-        const l = 0.82 + r() * 0.36;
-        colors[kind].push(new THREE.Color(l, l * (0.95 + r() * 0.1), l * 0.9));
-        count++;
+        list.push({ x: px, z: pz, kind, scale: rule.scale * (0.75 + r() * 0.6) });
       }
     }
   }
-  const geos = getTreeGeos();
-  const group = new THREE.Group();
-  (Object.keys(items) as TreeKind[]).forEach((k) => {
-    if (!items[k].length) return;
-    const inst = new THREE.InstancedMesh(geos[k], treeMaterial, items[k].length);
-    items[k].forEach((mat, i) => {
-      inst.setMatrixAt(i, mat);
-      inst.setColorAt(i, colors[k][i]);
-    });
-    inst.computeBoundingSphere();
-    group.add(inst);
-  });
-  return group;
+  return plantTrees(list, grid, seed ^ 0x5bd1);
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,8 @@ export interface QualityPreset {
   farRadius: number;
   /** Nombre maximal d'arbres par tuile proche. */
   maxTrees: number;
+  /** Densité du décor de bord de route (herbes hautes, clôtures, poteaux) : 0 à 1. */
+  roadside: number;
   /** Résolution des orthophotos utilisées pour colorer le sol (pixels par côté). */
   orthoPx: number;
   pixelRatio: number;
@@ -45,8 +47,8 @@ export interface QualityPreset {
 }
 
 export const QUALITY: Record<'low' | 'medium' | 'high', QualityPreset> = {
-  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, orthoPx: 48, pixelRatio: 1, antialias: false, post: 0, rideShadows: false },
-  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, orthoPx: 64, pixelRatio: 1.25, antialias: true, post: 1, rideShadows: true },
-  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, orthoPx: 96, pixelRatio: 2, antialias: true, post: 2, rideShadows: true },
+  low: { nearTile: 800, nearRes: 48, nearRadius: 1100, farTile: 6400, farRes: 40, farRadius: 9000, maxTrees: 900, roadside: 0.35, orthoPx: 48, pixelRatio: 1, antialias: false, post: 0, rideShadows: false },
+  medium: { nearTile: 800, nearRes: 64, nearRadius: 1500, farTile: 6400, farRes: 56, farRadius: 16000, maxTrees: 1800, roadside: 0.7, orthoPx: 64, pixelRatio: 1.25, antialias: true, post: 1, rideShadows: true },
+  high: { nearTile: 800, nearRes: 80, nearRadius: 1900, farTile: 6400, farRes: 72, farRadius: 24000, maxTrees: 3200, roadside: 1, orthoPx: 96, pixelRatio: 2, antialias: true, post: 2, rideShadows: true },
 };
 export type QualityLevel = keyof typeof QUALITY;

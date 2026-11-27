@@ -153,6 +153,22 @@ export function sampleGrid(g: HeightGrid, x: number, z: number): number {
   return h00 * (1 - tx) * (1 - tz) + h01 * tx * (1 - tz) + h10 * (1 - tx) * tz + h11 * tx * tz;
 }
 
+/**
+ * Altitude exacte de la surface du terrain dessiné : même découpage en triangles que
+ * buildTerrain (diagonale (r,c)→(r+1,c+1)). Sert à poser au ras du sol des objets plats
+ * (accotements) sans que le terrain ne les recouvre par endroits.
+ */
+export function sampleTerrain(g: HeightGrid, x: number, z: number): number {
+  const n = g.res;
+  const fx = Math.min(n, Math.max(0, ((x - g.x0) / g.size) * n));
+  const fz = Math.min(n, Math.max(0, ((z - g.z0) / g.size) * n));
+  const c = Math.min(n - 1, Math.floor(fx)), r = Math.min(n - 1, Math.floor(fz));
+  const tx = fx - c, tz = fz - r;
+  const w = n + 1;
+  const h00 = g.h[r * w + c], h01 = g.h[r * w + c + 1], h10 = g.h[(r + 1) * w + c], h11 = g.h[(r + 1) * w + c + 1];
+  return tz >= tx ? h00 + (h10 - h00) * tz + (h11 - h10) * tx : h00 + (h01 - h00) * tx + (h11 - h01) * tz;
+}
+
 /** Petit générateur pseudo-aléatoire déterministe (même monde à chaque chargement). */
 export function rng(seed: number): () => number {
   let s = seed >>> 0 || 1;
