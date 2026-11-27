@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WHEELS, type FrameId } from '../physics/equipment';
 import { OUTLINES, type FrameOutline, type Pt } from './frameOutlines';
-import { LENS, type RiderLook } from './look';
+import { type GlassesModel, LENS, type RiderLook } from './look';
 
 export type { RiderLook } from './look';
 
@@ -88,6 +88,48 @@ function stretchBack<T extends THREE.BufferGeometry>(g: T, k: number): T {
   return g;
 }
 
+/**
+ * Formes des verres de lunettes de sport, sur un cylindre de rayon 1 centré vers +X
+ * (a = angle depuis l'avant, ±1,25 aux tempes ; u = |a| / 1,25). Hauteur de −0,5 à +0,5.
+ *  - écran : grand verre d'un seul tenant, sourcil presque droit, encoche du nez étroite ;
+ *  - demi-cerclage : bas des verres libre et arrondi sous chaque œil, pont de nez marqué ;
+ *  - enveloppant fin : bande plus basse, verres en amande.
+ */
+const LENS_SHAPES: Record<GlassesModel, { top: (a: number, u: number) => number; bottom: (a: number, u: number) => number }> = {
+  shield: {
+    top: (_a, u) => 0.5 - 0.06 * u * u,
+    bottom: (a, u) => -0.5 + 0.3 * Math.exp(-(a * a) / 0.012) + 0.22 * Math.pow(u, 3),
+  },
+  halfrim: {
+    top: (_a, u) => 0.5 - 0.14 * u * u,
+    bottom: (a, u) => -0.5 + 0.48 * Math.exp(-(a * a) / 0.018) + 0.08 * Math.sin(Math.min(1, u * 1.6) * Math.PI) + 0.32 * Math.pow(u, 2.5),
+  },
+  wrap: {
+    top: (_a, u) => 0.5 - 0.18 * u * u,
+    bottom: (a, u) => -0.5 + 0.42 * Math.exp(-(a * a) / 0.02) + 0.35 * Math.pow(u, 3),
+  },
+};
+
+/** Verre : portion de cylindre découpée selon le modèle, bombée verticalement comme un écran. */
+function lensGeometry(model: GlassesModel): THREE.BufferGeometry {
+  const shape = LENS_SHAPES[model];
+  const g = new THREE.CylinderGeometry(1, 1, 1, 48, 6, true, Math.PI / 2 - 1.25, 2.5);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const a = Math.atan2(z, x), u = Math.abs(a) / 1.25;
+    const top = shape.top(a, u), bottom = shape.bottom(a, u);
+    const t = y + 0.5;
+    const yy = bottom + (top - bottom) * t;
+    // bombé vertical : le milieu du verre avance un peu (verre « torique » des lunettes de sport)
+    const bulge = 1 + 0.06 * (1 - (2 * t - 1) * (2 * t - 1));
+    pos.setXYZ(i, x * bulge, yy, z * bulge);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+
 const G = {
   /** demi-sphère (calotte) pour les casques */
   dome: keep(new THREE.SphereGeometry(1, 22, 10, 0, Math.PI * 2, 0, Math.PI / 2)),
@@ -105,33 +147,10 @@ const G = {
   /** molette de serrage */
   dial: keep(new THREE.CylinderGeometry(1, 1, 1, 16)),
   /** verre de lunettes enveloppant (portion de cylindre ouvert, centré vers +X) */
-  lens: keep(lensGeometry()),
+  lensShield: keep(lensGeometry('shield')),
+  lensHalfrim: keep(lensGeometry('halfrim')),
+  lensWrap: keep(lensGeometry('wrap')),
 };
-
-/**
- * Verre de lunettes de sport enveloppant : portion de cylindre (centrée vers +X) dont le bas
- * dessine deux verres arrondis avec un pont pour le nez au milieu, et qui s'affine vers les
- * branches. Hauteur 1 (de −0,5 à +0,5), rayon 1.
- */
-function lensGeometry(): THREE.BufferGeometry {
-  const span = 2.5, start = Math.PI / 2 - 1.25;
-  const g = new THREE.CylinderGeometry(1, 1, 1, 40, 4, true, start, span);
-  const pos = g.getAttribute('position');
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    // angle depuis l'avant (0 = devant le nez, ±1,25 = au niveau des tempes)
-    const a = Math.atan2(z, x);
-    const u = Math.abs(a) / 1.25;
-    // bord bas : remonté au pont du nez, arrondi sous chaque verre, remonté vers les branches
-    const bottom = -0.5 + 0.42 * Math.exp(-(a * a) / 0.02) + 0.35 * Math.pow(u, 3);
-    // bord haut : légèrement abaissé vers les branches
-    const top = 0.5 - 0.18 * Math.pow(u, 2);
-    const t = y + 0.5;
-    pos.setY(i, bottom + (top - bottom) * t);
-  }
-  g.computeVertexNormals();
-  return g;
-}
 
 /**
  * Prisme de hauteur 1 (axe Y) dont la section est donnée par des points [x, z] tournant
@@ -1107,10 +1126,15 @@ export class RiderModel {
     mHelmet.side = THREE.DoubleSide; // l'intérieur des coques ouvertes reste visible
     const mHelmetDark = lam('#1a1a1a');
     const lens = LENS[look.lens] ?? LENS.dark;
-    const mLens = new THREE.MeshStandardMaterial({
-      color: lens.color, emissive: lens.specular, emissiveIntensity: 0.08, roughness: 0.05, metalness: 0.9,
-      side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1, flatShading: FACET,
+    // verre miroir : reflets métalliques et irisation (les verres de course changent de teinte
+    // selon l'angle de vue)
+    const mLens = new THREE.MeshPhysicalMaterial({
+      color: lens.color, emissive: lens.specular, emissiveIntensity: 0.06, roughness: 0.04, metalness: 0.85,
+      clearcoat: 1, clearcoatRoughness: 0.03, iridescence: look.lens === 'dark' || look.lens === 'clear' ? 0.25 : 0.9,
+      iridescenceIOR: 1.6, iridescenceThicknessRange: [250, 600],
+      side: THREE.DoubleSide, transparent: look.lens === 'clear', opacity: look.lens === 'clear' ? 0.55 : 1,
     });
+    const mGlassFrame = shiny(look.glassesFrame ?? '#f2f2f2', 60, '#888888');
     own.push(mLens);
     const jerseyTex = jerseyTexture(look);
     const mJersey = lam('#ffffff', { map: jerseyTex });
@@ -1866,7 +1890,7 @@ export class RiderModel {
       for (const z of [-0.22, 0.22]) vent(shell, 0.82, z, 0.09, 0.08); // prises d'air frontales
       vent(shell, -0.9, 0, 0.18, 0.12); // sortie d'air arrière
       helmetParts.push(shell);
-      const visor = new THREE.Mesh(G.lens, mLens);
+      const visor = new THREE.Mesh(G.lensShield, mLens); // visière du casque CLM
       visor.scale.set(0.106 * hs, 0.072 * hs, 0.106 * hs);
       visor.position.copy(headC).add(V(0.008 * hs, 0.002 * hs));
       helmetParts.push(visor);
@@ -1907,17 +1931,53 @@ export class RiderModel {
       place(strap, headC.clone().add(V(-0.01 * hs, 0.02 * hs, side * 0.083 * hs)), headC.clone().add(V(0.04 * hs, -0.11 * hs, side * 0.025 * hs)), 0.003);
       helmetParts.push(strap);
     }
-    // lunettes enveloppantes
+    // lunettes de sport : verre selon le modèle, monture sur le haut du verre, branches épaisses
+    // qui s'affinent jusqu'au-dessus de l'oreille
     if (look.glasses && look.helmetType !== 'tt') {
-      const glass = new THREE.Mesh(G.lens, mLens);
-      glass.scale.set(0.096 * hs, 0.042 * hs, 0.092 * hs);
-      glass.position.copy(headC).add(V(0.013 * hs, 0.014 * hs));
+      const model: GlassesModel = look.glassesModel ?? 'shield';
+      const geo = model === 'shield' ? G.lensShield : model === 'halfrim' ? G.lensHalfrim : G.lensWrap;
+      const sc = V(0.097 * hs, (model === 'shield' ? 0.058 : model === 'halfrim' ? 0.05 : 0.042) * hs, 0.093 * hs);
+      const c0 = headC.clone().add(V(0.013 * hs, (model === 'shield' ? 0.008 : 0.014) * hs));
+      const glass = new THREE.Mesh(geo, mLens);
+      glass.scale.copy(sc);
+      glass.position.copy(c0);
       helmetParts.push(glass);
+      // point du bord haut du verre à l'angle a (même déformation que lensGeometry)
+      const shape = LENS_SHAPES[model];
+      const edge = (ang: number, yOff = 0) => {
+        const u = Math.abs(ang) / 1.25;
+        const r = 1.015 * (1 + 0.06 * (1 - 1));
+        return V(c0.x + Math.cos(ang) * sc.x * r, c0.y + (shape.top(ang, u) + yOff) * sc.y, c0.z + Math.sin(ang) * sc.z * r);
+      };
+      const rimPts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 24; k++) rimPts.push(edge(-1.25 + (2.5 * k) / 24, 0.02));
+      const rimR = model === 'wrap' ? 0.0026 : 0.0036;
+      helmetParts.push(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rimPts), 48, rimR, 6), mGlassFrame));
       for (const side of [-1, 1]) {
-        const arm = new THREE.Mesh(UNIT_CYL, mBlack);
-        place(arm, headC.clone().add(V(0.035 * hs, 0.016 * hs, side * 0.083 * hs)), headC.clone().add(V(-0.04 * hs, 0.012 * hs, side * 0.086 * hs)), 0.0025);
-        helmetParts.push(arm);
+        // charnière et branche : épaisse à l'avant, fine au-dessus de l'oreille
+        const hinge = edge(side * 1.25, -0.15);
+        const temple = new THREE.CatmullRomCurve3([
+          hinge,
+          headC.clone().add(V(-0.01 * hs, 0.018 * hs, side * 0.088 * hs)),
+          headC.clone().add(V(-0.055 * hs, 0.006 * hs, side * 0.087 * hs)),
+        ]);
+        const tg = new THREE.TubeGeometry(temple, 16, 0.0045, 6);
+        // effilement : rayon divisé par deux vers l'arrière
+        const p = tg.getAttribute('position');
+        const ctr = new THREE.Vector3();
+        for (let i = 0; i < p.count; i++) {
+          const ring = Math.floor(i / 7), t = ring / 16;
+          temple.getPoint(t, ctr);
+          const k = 1 - 0.5 * t;
+          p.setXYZ(i, ctr.x + (p.getX(i) - ctr.x) * k, ctr.y + (p.getY(i) - ctr.y) * k * 1.6, ctr.z + (p.getZ(i) - ctr.z) * k);
+        }
+        tg.computeVertexNormals();
+        helmetParts.push(new THREE.Mesh(tg, mGlassFrame));
+        // embout de monture à l'extrémité du verre (écran et demi-cerclage)
+        if (model !== 'wrap') helmetParts.push(blob(mGlassFrame, hinge, 0.008, 0.012, 0.006));
       }
+      // plaquettes de nez
+      helmetParts.push(blob(lam('#8d9297', { transparent: true, opacity: 0.55 }), c0.clone().add(V(sc.x * 0.97, -0.36 * sc.y)), 0.004, 0.006, 0.009));
     }
     if (helmetParts.length) this.body.add(...helmetParts);
     this.headParts.push(...helmetParts);

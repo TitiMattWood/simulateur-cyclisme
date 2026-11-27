@@ -512,6 +512,10 @@ export class App {
         ${check('pf-glasses', 'pf.glasses', a.glasses)}
         ${sel('pf-lens', 'pf.lens', ['dark', 'blue', 'red', 'orange', 'clear'] as const, a.lens, tr('lens'))}
       </div>
+      <div class="grid2">
+        ${sel('pf-gmodel', 'pf.glassesModel', ['shield', 'halfrim', 'wrap'] as const, a.glassesModel ?? 'shield', tr('glasses'))}
+        ${color('pf-gframe', 'pf.glassesFrame', a.glassesFrame ?? '#f2f2f2')}
+      </div>
       <div class="grid3">
         ${color('pf-shoes', 'pf.shoes', a.shoeColor)}
         ${sel('pf-sockh', 'pf.socks', ['low', 'mid', 'high'] as const, a.sockHeight, tr('socks'))}
@@ -630,6 +634,8 @@ export class App {
       helmetType: val('pf-helmet') as Appearance['helmetType'],
       glasses: chk('pf-glasses'),
       lens: val('pf-lens') as Appearance['lens'],
+      glassesModel: val('pf-gmodel') as Appearance['glassesModel'],
+      glassesFrame: val('pf-gframe'),
       shoeColor: val('pf-shoes'),
       sockColor: val('pf-sockc'),
       sockHeight: val('pf-sockh') as Appearance['sockHeight'],

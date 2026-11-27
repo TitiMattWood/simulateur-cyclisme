@@ -26,6 +26,7 @@ const look: RiderLook = {
   ...defaultAppearance('climb'), ...DEFAULT_PAINTS.climb, style, sleeves: 'short', gloves: 'mitts',
   heightCm: 178, weightKg: 72, frame: 'climb', wheels: 'pro55',
   jerseyColor: '#e4572e', jerseyColor2: '#1d3557', helmetColor: '#ffffff', overshoes: false,
+  glassesModel: (q.get('glasses') ?? 'shield') as RiderLook['glassesModel'], lens: (q.get('lens') ?? 'blue') as RiderLook['lens'],
 };
 const m = new RiderModel(look, q.get('standing') ? { standing: { holdZ: 0.42 } } : {});
 m.update(0, 0);
@@ -33,7 +34,13 @@ m.crankAngle = Number(q.get('crank') ?? 1.2);
 m.update(0.0001, 0);
 scene.add(m.root);
 // quatre vues : profil côté transmission, 3/4 avant, 3/4 arrière, gros plan genou/coude
-const views: Array<[THREE.Vector3, THREE.Vector3, number]> = [
+const head = q.get('head') ? m.eye.clone() : null;
+const views: Array<[THREE.Vector3, THREE.Vector3, number]> = head ? [
+  [head.clone().add(new THREE.Vector3(0.05, 0.02, 0.45)), head, 22],
+  [head.clone().add(new THREE.Vector3(0.4, 0.05, 0.25)), head, 22],
+  [head.clone().add(new THREE.Vector3(0.45, 0.02, 0)), head, 22],
+  [head.clone().add(new THREE.Vector3(-0.05, 0.25, 0.4)), head, 24],
+] : [
   [new THREE.Vector3(0.55, 0.95, 2.4), new THREE.Vector3(0.55, 0.9, 0), 38],
   [new THREE.Vector3(2.0, 1.3, 1.5), new THREE.Vector3(0.6, 1.0, 0), 34],
   [new THREE.Vector3(-1.2, 1.4, 1.6), new THREE.Vector3(0.4, 0.95, 0), 34],

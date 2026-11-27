@@ -13,6 +13,8 @@ export type JerseyPattern = 'solid' | 'hoops' | 'diagonal' | 'chest' | 'shoulder
 export type HairStyle = 'short' | 'long' | 'ponytail' | 'bald';
 export type Beard = 'none' | 'stubble' | 'full';
 export type HelmetType = 'road' | 'aero' | 'tt';
+/** modèles de lunettes de sport (esprit des grands écrans de course, sans marque) */
+export type GlassesModel = 'shield' | 'halfrim' | 'wrap';
 export type LensColor = 'dark' | 'blue' | 'red' | 'orange' | 'clear';
 export type SockHeight = 'low' | 'mid' | 'high';
 export type Gloves = 'none' | 'mitts' | 'full';
@@ -47,6 +49,10 @@ export interface Appearance {
   helmetType: HelmetType;
   glasses: boolean;
   lens: LensColor;
+  /** modèle de lunettes : écran d'un seul tenant, demi-cerclage, enveloppant fin */
+  glassesModel?: GlassesModel;
+  /** couleur de la monture */
+  glassesFrame?: string;
   shoeColor: string;
   sockColor: string;
   sockHeight: SockHeight;
@@ -127,6 +133,8 @@ export function defaultAppearance(frame: FrameId = 'climb'): Appearance {
     helmetType: 'road',
     glasses: true,
     lens: 'dark',
+    glassesModel: 'shield',
+    glassesFrame: '#f2f2f2',
     shoeColor: '#f2f2f2',
     sockColor: '#f4f4f4',
     sockHeight: 'high',
