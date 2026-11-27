@@ -347,7 +347,7 @@ export const fr = {
   'home.hint': 'Clic-glisser pour tourner autour · molette pour zoomer · double-clic pour revenir',
   'tv.noTrainer': 'Home trainer non connecté',
   'tv.connectHint': 'Va dans l’onglet Capteurs pour le connecter',
-  'upd.text': 'Nouvelle version de MyHomeRide disponible',
+  'upd.text': 'Nouvelle version de HomeRide disponible',
   'upd.reload': 'Recharger',
   'upd.later': 'Plus tard',
 };

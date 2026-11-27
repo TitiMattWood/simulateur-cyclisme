@@ -1,6 +1,6 @@
 /**
  * Loft industriel : mur de briques, poutres métalliques, verrière d'atelier, sol en béton,
- * ampoules à filament et enseigne néon « MyHomeRide ».
+ * ampoules à filament et enseigne néon « HomeRide ».
  */
 import * as THREE from 'three';
 import {
@@ -61,7 +61,7 @@ export function industrialLoft(neon: NeonSetting = { color: '#ff4fa8', on: true 
   // ----- Enseigne néon sur les briques
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 0.65), new THREE.MeshBasicMaterial({
     // éteinte : le tube reste visible, gris et sans éclat
-    map: neonSign('MyHomeRide', neon.on ? neon.color : '#6b6b6b'), transparent: true, toneMapped: false,
+    map: neonSign('HomeRide', neon.on ? neon.color : '#6b6b6b'), transparent: true, toneMapped: false,
     color: neon.on ? new THREE.Color(1.5, 1.5, 1.5) : new THREE.Color(0.35, 0.35, 0.35),
   }));
   sign.position.set(0.6, 2.3, -2.98);

@@ -128,7 +128,7 @@ export class App {
     this.ui.innerHTML = `
       <div class="home">
         <header class="topbar">
-          <div class="logo">MyHomeRide<span>by Titi</span></div>
+          <div class="logo">HomeRide<span>by Titi</span></div>
           <nav class="tabs">${tabs.map((k) => `<button data-tab="${k}" class="${k === this.tab ? 'active' : ''}">${t(`tab.${k}` as I18nKey)}</button>`).join('')}</nav>
           <div class="level">
             <span class="lvl-badge">${lvl.level}</span>
@@ -747,7 +747,7 @@ export class App {
       this.renderHome();
     });
     $(this.ui, '#bk-export').addEventListener('click', () => {
-      downloadFile(exportBackup(this.save), safeFilename('MyHomeRide-sauvegarde', new Date(), 'json'), 'application/json');
+      downloadFile(exportBackup(this.save), safeFilename('HomeRide-sauvegarde', new Date(), 'json'), 'application/json');
     });
     $<HTMLInputElement>(this.ui, '#bk-import').addEventListener('change', async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];

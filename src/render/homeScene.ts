@@ -27,8 +27,11 @@ const RIDER_TARGET = new THREE.Vector3(0.5, 0.95, 0);
 type Focus = 'room' | 'rider' | 'garage';
 
 /** Caméra du mode garage : le vélo complet au premier plan, les vélos et roues rangés derrière. */
-const GARAGE_POS = new THREE.Vector3(2.3, 1.8, 3.7);
-const GARAGE_TARGET = new THREE.Vector3(-1.05, 0.9, -0.5);
+// En configuration, le vélo est posé de profil juste devant le garage (mur arrière) : il remplit
+// l'image, et les vélos rangés et les roues accrochées apparaissent derrière lui.
+const SHOW_BIKE = new THREE.Vector3(-1.2, 0, -0.38);
+const GARAGE_POS = new THREE.Vector3(1.05, 1.12, -0.7);
+const GARAGE_TARGET = new THREE.Vector3(-1.2, 0.6, -0.9);
 
 /** Mesures affichées sur la TV de l'accueil. */
 export interface TvLive {
@@ -178,6 +181,9 @@ export class HomeScene implements View {
     if (garage && !this.showBike) {
       this.showBike = new RiderModel(this.look, { bikeOnly: true });
       this.showBike.root.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
+      // tourné vers le fond de la pièce : on le voit de profil côté transmission
+      this.showBike.root.position.copy(SHOW_BIKE);
+      this.showBike.root.rotation.y = Math.PI / 2;
       this.scene.add(this.showBike.root);
     }
     if (this.showBike) this.showBike.root.visible = garage;

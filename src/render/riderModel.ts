@@ -218,7 +218,7 @@ const UNITS = {
 let FACET = false;
 /** nombre de segments selon le style (finesse en arrondi, sobriété en facettes) */
 const seg = (smooth: number, facet: number) => (FACET ? facet : smooth);
-/** Supports du décor « MyHomeRide » posé sur les deux flancs du tube diagonal. */
+/** Supports du décor « HomeRide » posé sur les deux flancs du tube diagonal. */
 const DECAL_R = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).translate(0.15, 0.52, 1.03));
 const DECAL_L = keep(new THREE.PlaneGeometry(1, 1).rotateZ(Math.PI / 2).scale(1.05, 0.62, 1).rotateX(Math.PI).translate(0.15, 0.52, -1.03));
 
@@ -435,14 +435,14 @@ function jerseyTexture(look: RiderLook): THREE.CanvasTexture {
   return toTexture(c);
 }
 
-/** Inscription « MyHomeRide » du tube diagonal (fond transparent). */
+/** Inscription « HomeRide » du tube diagonal (fond transparent). */
 function wordmarkTexture(color: string): THREE.CanvasTexture {
   const [c, g] = canvas(512, 128);
   g.fillStyle = color;
   g.font = 'italic 800 78px system-ui, "Segoe UI", sans-serif';
   g.textBaseline = 'middle';
   g.textAlign = 'center';
-  g.fillText('MyHomeRide', 256, 66);
+  g.fillText('HomeRide', 256, 66);
   // petit trait de soulignement dynamique
   g.fillRect(70, 108, 372, 6);
   return toTexture(c);
@@ -997,7 +997,7 @@ export class RiderModel {
     }
     bike.add(blob(mFrame, bb, 0.034, 0.034, 0.045)); // boîtier de pédalier
     bike.add(blob(mFrame, seatTop.clone().add(V(-0.004, -0.008)), T * 1.25, T * 1.6, T * 1.1)); // nœud de selle
-    // décor « MyHomeRide » sur les deux flancs du tube diagonal
+    // décor « HomeRide » sur les deux flancs du tube diagonal
     {
       const mWord = lam('#ffffff', { map: wordmarkTexture(look.frameColor2), transparent: true, alphaTest: 0.35, polygonOffset: true, polygonOffsetFactor: -2 });
       for (const g of [DECAL_R, DECAL_L]) {
