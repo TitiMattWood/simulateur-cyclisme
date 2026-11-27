@@ -37,11 +37,11 @@ describe('difficulté des adversaires', () => {
 
 describe('roster', () => {
   it('coureurs nommés, sans doublon, adversaires hors de l’équipe du joueur', () => {
-    const r = buildRoster({ seed: 9, opponents: 10, difficulty: 'equal', playerFtp: 250, playerTeam: 'azur', teammates: 2 });
+    const r = buildRoster({ seed: 9, opponents: 10, difficulty: 'equal', playerFtp: 250, playerTeam: 'tricolore', teammates: 2 });
     expect(r).toHaveLength(12);
     expect(new Set(r.map((x) => x.id)).size).toBe(12);
-    expect(r.filter((x) => x.isTeammate).every((x) => x.teamId === 'azur')).toBe(true);
-    expect(r.filter((x) => !x.isTeammate).some((x) => x.teamId === 'azur')).toBe(false);
+    expect(r.filter((x) => x.isTeammate).every((x) => x.teamId === 'tricolore')).toBe(true);
+    expect(r.filter((x) => !x.isTeammate).some((x) => x.teamId === 'tricolore')).toBe(false);
     expect(r.every((x) => x.firstName && x.lastName)).toBe(true);
   });
 
@@ -61,5 +61,21 @@ describe('migration de la sauvegarde', () => {
     expect(save.profile.rideSetup.difficulty).toBe(d);
     expect('level' in save.profile.rideSetup).toBe(false);
     expect(save.profile.teamId).toBe('');
+  });
+});
+
+describe('équipe créée par le joueur', () => {
+  it('ses coéquipiers portent ses couleurs et viennent de « Mon équipe »', async () => {
+    const { makeMyTeam, setMyTeam, teamById, MY_TEAM_ID } = await import('../src/data/teams');
+    setMyTeam(makeMyTeam({
+      name: 'Les Rouleurs du Vexin', jersey: ['#123456', '#ffffff', '#ff0000'], pattern: 'band', shorts: '#000000',
+      helmet: '#ffffff', frame: 'aero', frameColor: '#123456', frameColor2: '#ffffff', wheels: 'mono60',
+    }));
+    expect(teamById(MY_TEAM_ID)?.name).toBe('Les Rouleurs du Vexin');
+    const r = buildRoster({ seed: 3, opponents: 8, difficulty: 'equal', playerFtp: 250, playerTeam: MY_TEAM_ID, teammates: 2 });
+    expect(r.filter((x) => x.isTeammate).length).toBe(2);
+    expect(r.filter((x) => x.isTeammate).every((x) => x.teamId === MY_TEAM_ID)).toBe(true);
+    setMyTeam(null);
+    expect(teamById(MY_TEAM_ID)).toBeUndefined();
   });
 });

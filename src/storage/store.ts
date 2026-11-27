@@ -37,8 +37,10 @@ export interface Profile {
   jerseyColor: string;
   jerseyColor2: string;
   helmetColor: string;
-  /** équipe du joueur (src/data/teams.ts) ; '' = maillot personnalisé */
+  /** équipe du joueur (src/data/teams.ts) ; '' = maillot personnalisé ; 'mine' = équipe créée */
   teamId: string;
+  /** nom de l'équipe créée par le joueur (ses couleurs sont celles de sa tenue et de son vélo) */
+  myTeamName: string;
   /** apparence détaillée : cycliste, tenue, vélo (voir render/look.ts) */
   appearance: Appearance;
   /** derniers réglages de sortie (mode, groupe, course, vent) */
@@ -85,6 +87,7 @@ export function defaultProfile(): Profile {
     jerseyColor2: '#1d3557',
     helmetColor: '#f1faee',
     teamId: '',
+    myTeamName: '',
     appearance: defaultAppearance(),
     rideSetup: defaultSetup(),
     lang: 'fr',

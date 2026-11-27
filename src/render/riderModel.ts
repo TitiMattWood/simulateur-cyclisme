@@ -453,6 +453,28 @@ function jerseyTexture(look: RiderLook): THREE.CanvasTexture {
         }
       }
       break;
+    case 'band':
+      // haut du maillot en couleur 1, bas en couleur 2, liseré de couleur 3 (maillots « deux tons »)
+      g.fillStyle = c2;
+      g.fillRect(0, 150, 256, 106);
+      g.fillStyle = c3;
+      g.fillRect(0, 144, 256, 8);
+      break;
+    case 'split':
+      // coupe en biais : épaule gauche en couleur 1, flanc droit en couleur 2, liseré de couleur 3
+      for (const off of [0, 128]) {
+        g.fillStyle = c2;
+        g.beginPath();
+        g.moveTo(off + 128, 20); g.lineTo(off + 128, 256); g.lineTo(off - 10, 256);
+        g.closePath();
+        g.fill();
+        g.strokeStyle = c3;
+        g.lineWidth = 6;
+        g.beginPath();
+        g.moveTo(off + 128, 20); g.lineTo(off - 10, 256);
+        g.stroke();
+      }
+      break;
     case 'gradient': {
       const grad = g.createLinearGradient(0, 0, 0, 256);
       grad.addColorStop(0, c2);

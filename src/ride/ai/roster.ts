@@ -96,7 +96,7 @@ export function buildRoster(o: RosterOptions): RiderRecord[] {
   };
   // coéquipiers : dans l'effectif de l'équipe du joueur
   if (mates) {
-    const idx = shuffle(TEAMS.find((t) => t.id === o.playerTeam)!.riders.map((_, i) => i), rnd);
+    const idx = shuffle(teamById(o.playerTeam)!.riders.map((_, i) => i), rnd);
     for (let i = 0; i < mates; i++) out.push(record(o.playerTeam, idx[i], true));
   }
   // adversaires : on pioche à tour de rôle dans les autres équipes, pour un peloton varié

@@ -1,6 +1,7 @@
 /**
- * Équipes fictives du peloton : maillots inspirés des grandes couleurs du cyclisme pro (aucun
- * nom ni logo réel), matériel, et effectif de coureurs avec leur spécialité.
+ * Équipes du peloton, inspirées des 18 équipes du WorldTour : couleurs de maillot, de cuissard,
+ * de casque et de vélo proches des leurs (l'équipe d'inspiration est indiquée en commentaire),
+ * mais noms inventés, sans marque ni sponsor. Effectif de coureurs fictifs avec leur spécialité.
  *
  * Les noms sont inventés. Chaque coureur a un type :
  *  - « climber » (grimpeur) : léger, attaque en montée ;
@@ -33,63 +34,154 @@ export interface Team {
   riders: TeamRider[];
 }
 
+
 const R = (first: string, last: string, kind: RiderKind): TeamRider => ({ first, last, kind });
 
 export const TEAMS: Team[] = [
   {
-    id: 'azur', name: 'Azur Vélo', jersey: ['#1d4ed8', '#ffffff', '#facc15'], pattern: 'chest', shorts: '#0b1b3f',
-    frame: 'aero', frameColor: '#0f172a', frameColor2: '#38bdf8', wheels: 'c55', helmet: '#ffffff',
-    riders: [R('Léo', 'Garnier', 'rouleur'), R('Hugo', 'Marchand', 'climber'), R('Nathan', 'Lemoine', 'sprinter'), R('Inès', 'Roussel', 'rouleur'), R('Théo', 'Barbier', 'climber'), R('Jules', 'Perrin', 'rouleur')],
+    // inspiré de UAE Team Emirates : blanc, bas noir, filet rouge ; vélo blanc et noir
+    id: 'desert', name: 'Désert Blanc', jersey: ['#f4f4f4', '#111111', '#d62828'], pattern: 'band', shorts: '#111111',
+    frame: 'climb', frameColor: '#f2f2f2', frameColor2: '#111111', wheels: 'pro65', helmet: '#ffffff',
+    riders: [R('Léo', 'Garnier', 'rouleur'), R('Hugo', 'Roussel', 'climber'), R('Nathan', 'Fontaine', 'sprinter'), R('Inès', 'Girard', 'rouleur'), R('Théo', 'Renaud', 'climber'), R('Jules', 'Picard', 'rouleur')],
   },
   {
-    id: 'cerise', name: 'Rouge Cerise', jersey: ['#dc2626', '#111111', '#ffffff'], pattern: 'diagonal', shorts: '#111111',
-    frame: 'climb', frameColor: '#b91c1c', frameColor2: '#ffffff', wheels: 'c40', helmet: '#111111',
-    riders: [R('Lucas', 'Fontaine', 'climber'), R('Chloé', 'Dumas', 'rouleur'), R('Arthur', 'Lacroix', 'sprinter'), R('Manon', 'Girard', 'climber'), R('Romain', 'Chevalier', 'rouleur'), R('Louis', 'Mercier', 'rouleur')],
+    // inspiré de Visma | Lease a Bike : jaune et noir ; vélo aéro noir et jaune
+    id: 'essaim', name: 'Essaim Jaune', jersey: ['#ffd400', '#111111', '#ffffff'], pattern: 'band', shorts: '#111111',
+    frame: 'aero', frameColor: '#111111', frameColor2: '#ffd400', wheels: 'pro65', helmet: '#ffd400',
+    riders: [R('Lucas', 'Dumas', 'climber'), R('Chloé', 'Chevalier', 'sprinter'), R('Arthur', 'Collin', 'rouleur'), R('Manon', 'Royer', 'climber'), R('Romain', 'Bertin', 'rouleur'), R('Louis', 'Guérin', 'rouleur')],
   },
   {
-    id: 'prairie', name: 'Vert Prairie', jersey: ['#16a34a', '#bbf7d0', '#052e16'], pattern: 'hoops', shorts: '#052e16',
-    frame: 'climb', frameColor: '#e5e7eb', frameColor2: '#16a34a', wheels: 'c40', helmet: '#16a34a',
-    riders: [R('Maxime', 'Renaud', 'sprinter'), R('Jade', 'Collin', 'climber'), R('Antoine', 'Morel', 'rouleur'), R('Camille', 'Picard', 'rouleur'), R('Bastien', 'Royer', 'climber'), R('Simon', 'Leclerc', 'rouleur')],
+    // inspiré de Soudal Quick-Step : bleu nuit et bleu ciel ; vélo bleu nuit
+    id: 'meute', name: 'La Meute Bleue', jersey: ['#203a8f', '#4fa3e0', '#ffffff'], pattern: 'gradient', shorts: '#0b1b3f',
+    frame: 'climb', frameColor: '#1c2f6b', frameColor2: '#ffffff', wheels: 'pro55', helmet: '#ffffff',
+    riders: [R('Maxime', 'Morel', 'sprinter'), R('Jade', 'Leclerc', 'rouleur'), R('Antoine', 'Carré', 'climber'), R('Camille', 'Brunet', 'rouleur'), R('Bastien', 'Rolland', 'rouleur'), R('Simon', 'Huet', 'climber')],
   },
   {
-    id: 'couchant', name: 'Soleil Couchant', jersey: ['#f97316', '#fde047', '#7c2d12'], pattern: 'gradient', shorts: '#1c1917',
-    frame: 'aero', frameColor: '#f97316', frameColor2: '#1c1917', wheels: 'c88', helmet: '#fde047',
-    riders: [R('Julie', 'Vasseur', 'rouleur'), R('Quentin', 'Bertin', 'sprinter'), R('Lina', 'Carré', 'climber'), R('Adrien', 'Hamon', 'rouleur'), R('Paul', 'Guérin', 'rouleur'), R('Elsa', 'Brunet', 'climber')],
+    // inspiré de INEOS Grenadiers : bleu nuit, bandeau rouge ; vélo bleu nuit
+    id: 'grenat', name: 'Grenat Nuit', jersey: ['#0d1b2a', '#c8102e', '#ffffff'], pattern: 'chest', shorts: '#0d1b2a',
+    frame: 'climb', frameColor: '#0d1b2a', frameColor2: '#c8102e', wheels: 'pro55', helmet: '#0d1b2a',
+    riders: [R('Julie', 'Hamon', 'rouleur'), R('Quentin', 'Aubert', 'climber'), R('Lina', 'Leroux', 'rouleur'), R('Adrien', 'Gauthier', 'rouleur'), R('Paul', 'Faure', 'climber'), R('Elsa', 'Moulin', 'sprinter')],
   },
   {
-    id: 'nuit', name: 'Nuit Blanche', jersey: ['#111827', '#e5e7eb', '#a855f7'], pattern: 'shoulders', shorts: '#111827',
-    frame: 'aero', frameColor: '#111827', frameColor2: '#a855f7', wheels: 'c55', helmet: '#e5e7eb',
-    riders: [R('Victor', 'Aubert', 'climber'), R('Sarah', 'Noël', 'rouleur'), R('Clément', 'Rolland', 'sprinter'), R('Mathis', 'Leroux', 'rouleur'), R('Alice', 'Masson', 'climber'), R('Florian', 'Huet', 'rouleur')],
+    // inspiré de Red Bull-BORA-hansgrohe : marine, rouge et jaune ; vélo marine
+    id: 'tonnerre', name: 'Bleu Tonnerre', jersey: ['#0b1f4d', '#c8102e', '#f2c500'], pattern: 'split', shorts: '#0b1f4d',
+    frame: 'aero', frameColor: '#0b1f4d', frameColor2: '#c8102e', wheels: 'saw58', helmet: '#0b1f4d',
+    riders: [R('Victor', 'Masson', 'climber'), R('Sarah', 'Lambert', 'rouleur'), R('Clément', 'Rey', 'rouleur'), R('Mathis', 'Benoît', 'climber'), R('Alice', 'Gaillard', 'sprinter'), R('Florian', 'Charpentier', 'rouleur')],
   },
   {
-    id: 'grimpeurs', name: 'Grimpeurs Réunis', jersey: ['#ffffff', '#dc2626', '#dc2626'], pattern: 'polka', shorts: '#111111',
-    frame: 'climb', frameColor: '#f5f5f5', frameColor2: '#dc2626', wheels: 'c40', helmet: '#dc2626',
-    riders: [R('Baptiste', 'Gauthier', 'climber'), R('Margaux', 'Lambert', 'climber'), R('Kevin', 'Bonnet', 'rouleur'), R('Thomas', 'Faure', 'climber'), R('Océane', 'Rey', 'rouleur'), R('Damien', 'Arnaud', 'sprinter')],
+    // inspiré de Lidl-Trek : marine, écharpe rouge, filet jaune ; vélo rouge
+    id: 'trident', name: 'Trident Rouge', jersey: ['#0a2a6b', '#e30613', '#ffd200'], pattern: 'diagonal', shorts: '#0a2a6b',
+    frame: 'aero', frameColor: '#c4161c', frameColor2: '#0a2a6b', wheels: 'pro65', helmet: '#0a2a6b',
+    riders: [R('Baptiste', 'Arnaud', 'rouleur'), R('Margaux', 'Caron', 'rouleur'), R('Kevin', 'Prévost', 'climber'), R('Thomas', 'Lebrun', 'sprinter'), R('Océane', 'Marty', 'rouleur'), R('Damien', 'Le Gall', 'climber')],
   },
   {
-    id: 'lagon', name: 'Lagon', jersey: ['#06b6d4', '#0e7490', '#ecfeff'], pattern: 'checker', shorts: '#083344',
-    frame: 'climb', frameColor: '#0e7490', frameColor2: '#ecfeff', wheels: 'c55', helmet: '#06b6d4',
-    riders: [R('Axel', 'Moulin', 'rouleur'), R('Laura', 'Benoît', 'sprinter'), R('Yanis', 'Caron', 'climber'), R('Pierre', 'Blanc', 'rouleur'), R('Noémie', 'Gaillard', 'climber'), R('Benoît', 'Prévost', 'rouleur')],
+    // inspiré de Alpecin-Deceuninck : noir et bleu ; vélo aéro noir
+    id: 'cobalt', name: 'Noir Cobalt', jersey: ['#0b0f1a', '#1f6fd1', '#ffffff'], pattern: 'gradient', shorts: '#0b0f1a',
+    frame: 'aero', frameColor: '#111111', frameColor2: '#1f6fd1', wheels: 'mono60', helmet: '#111111',
+    riders: [R('Axel', 'Jacquet', 'rouleur'), R('Laura', 'Rivière', 'climber'), R('Yanis', 'Dupré', 'sprinter'), R('Pierre', 'Rossi', 'rouleur'), R('Noémie', 'Navarro', 'climber'), R('Benoît', 'Lindqvist', 'rouleur')],
   },
   {
-    id: 'ardoise', name: 'Ardoise', jersey: ['#475569', '#f59e0b', '#f8fafc'], pattern: 'solid', shorts: '#1e293b',
-    frame: 'aero', frameColor: '#334155', frameColor2: '#f59e0b', wheels: 'c50', helmet: '#f59e0b',
-    riders: [R('Rémi', 'Jacquet', 'rouleur'), R('Pauline', 'Charpentier', 'climber'), R('Dylan', 'Lebrun', 'sprinter'), R('Gaëtan', 'Rivière', 'rouleur'), R('Anaïs', 'Vidal', 'climber'), R('Loïc', 'Marty', 'rouleur')],
+    // inspiré de EF Education-EasyPost : rose et marine ; vélo rose
+    id: 'rose', name: 'Rose Fluo', jersey: ['#ff4fa3', '#1d2a6b', '#ffffff'], pattern: 'shoulders', shorts: '#1d2a6b',
+    frame: 'climb', frameColor: '#ff4fa3', frameColor2: '#1d2a6b', wheels: 'pro55', helmet: '#ff4fa3',
+    riders: [R('Rémi', 'Schmitt', 'climber'), R('Pauline', 'Jensen', 'sprinter'), R('Dylan', 'Bianchi', 'rouleur'), R('Gaëtan', 'Hughes', 'climber'), R('Anaïs', 'Aranburu', 'rouleur'), R('Loïc', 'Janssens', 'rouleur')],
   },
   {
-    // jaune et noir, à la façon des équipes « abeille » du peloton
-    id: 'bourdon', name: 'Bourdon Jaune', jersey: ['#facc15', '#111111', '#111111'], pattern: 'chest', shorts: '#111111',
-    frame: 'aero', frameColor: '#111111', frameColor2: '#facc15', wheels: 'c50', helmet: '#facc15',
-    riders: [R('Valentin', 'Dupré', 'climber'), R('Émilie', 'Schmitt', 'rouleur'), R('Corentin', 'Le Gall', 'rouleur'), R('Matteo', 'Rossi', 'climber'), R('Lars', 'Jensen', 'rouleur'), R('Tom', 'De Wit', 'sprinter')],
+    // inspiré de Decathlon AG2R La Mondiale : bleu, blanc, cuissard brun ; vélo bleu
+    id: 'azurterre', name: 'Azur et Terre', jersey: ['#1e78d2', '#ffffff', '#5a3418'], pattern: 'band', shorts: '#3d2412',
+    frame: 'climb', frameColor: '#1e78d2', frameColor2: '#ffffff', wheels: 'clim45', helmet: '#ffffff',
+    riders: [R('Valentin', 'Novak', 'sprinter'), R('Émilie', 'Moreno', 'rouleur'), R('Corentin', 'Ortega', 'climber'), R('Matteo', 'Peeters', 'rouleur'), R('Lars', 'Berg', 'rouleur'), R('Tom', 'Greco', 'climber')],
   },
   {
-    // blanc, noir et rouge, sobre et élégant
-    id: 'sable', name: 'Sable Blanc', jersey: ['#f8fafc', '#111111', '#dc2626'], pattern: 'shoulders', shorts: '#111111',
-    frame: 'climb', frameColor: '#f8fafc', frameColor2: '#111111', wheels: 'c45', helmet: '#f8fafc',
-    riders: [R('Diego', 'Navarro', 'climber'), R('Marco', 'Bianchi', 'rouleur'), R('Jan', 'Novak', 'sprinter'), R('Erik', 'Lindqvist', 'rouleur'), R('Owen', 'Hughes', 'climber'), R('Sofia', 'Moreno', 'rouleur')],
+    // inspiré de Groupama-FDJ : bleu, blanc, filet rouge ; vélo aéro bleu
+    id: 'tricolore', name: 'Tricolore', jersey: ['#1e3a8a', '#ffffff', '#e11d2e'], pattern: 'shoulders', shorts: '#1e3a8a',
+    frame: 'aero', frameColor: '#1e3a8a', frameColor2: '#ffffff', wheels: 'saw58', helmet: '#ffffff',
+    riders: [R('Diego', 'Vogel', 'rouleur'), R('Marco', 'Nielsen', 'climber'), R('Jan', 'Conti', 'rouleur'), R('Erik', 'Marino', 'rouleur'), R('Owen', 'Walsh', 'climber'), R('Sofia', 'Clarke', 'sprinter')],
+  },
+  {
+    // inspiré de Bahrain Victorious : rouge et marine, filet orangé ; vélo rouge
+    id: 'corail', name: 'Corail Marine', jersey: ['#d0021b', '#0a1f44', '#f5a623'], pattern: 'split', shorts: '#0a1f44',
+    frame: 'aero', frameColor: '#d0021b', frameColor2: '#0a1f44', wheels: 'mono60', helmet: '#d0021b',
+    riders: [R('Mikel', 'Ferrari', 'climber'), R('Iker', 'Hofmann', 'rouleur'), R('Pablo', 'Murphy', 'rouleur'), R('Jonas', 'Wagner', 'climber'), R('Sander', 'Dvořák', 'sprinter'), R('Wout', 'Bakker', 'rouleur')],
+  },
+  {
+    // inspiré de Movistar : bleu marine, coutures vert citron ; vélo marine
+    id: 'citron', name: 'Marine Citron', jersey: ['#0b2a6f', '#0b2a6f', '#b8e636'], pattern: 'solid', shorts: '#0b2a6f',
+    frame: 'climb', frameColor: '#0b2a6f', frameColor2: '#b8e636', wheels: 'pro55', helmet: '#0b2a6f',
+    riders: [R('Mads', 'Byrne', 'rouleur'), R('Magnus', 'Sørensen', 'rouleur'), R('Tobias', 'Kovac', 'climber'), R('Filippo', 'Mulder', 'sprinter'), R('Giulio', 'Torres', 'rouleur'), R('Andrea', 'Horvat', 'climber')],
+  },
+  {
+    // inspiré de Jayco AlUla : bleu et orange ; vélo aéro bleu
+    id: 'austral', name: 'Austral', jersey: ['#003a8c', '#ff7a00', '#ffffff'], pattern: 'split', shorts: '#003a8c',
+    frame: 'aero', frameColor: '#003a8c', frameColor2: '#ff7a00', wheels: 'saw58', helmet: '#ffffff',
+    riders: [R('Luca', 'Visser', 'rouleur'), R('Nils', 'Herrera', 'climber'), R('Finn', 'Kowalski', 'sprinter'), R('Ethan', 'Molina', 'rouleur'), R('Liam', 'Costa', 'climber'), R('Oscar', 'Kerdraon', 'rouleur')],
+  },
+  {
+    // inspiré de Intermarché-Wanty : blanc, bas bleu, filet jaune ; vélo blanc
+    id: 'blancbleu', name: 'Blanc Bleu', jersey: ['#ffffff', '#1d4ed8', '#facc15'], pattern: 'band', shorts: '#1d4ed8',
+    frame: 'climb', frameColor: '#ffffff', frameColor2: '#1d4ed8', wheels: 'clim45', helmet: '#ffffff',
+    riders: [R('Ben', 'Nowak', 'climber'), R('Jakob', 'Serrano', 'sprinter'), R('Kasper', 'Silva', 'rouleur'), R('Rasmus', 'Tanguy', 'climber'), R('Milan', 'Roux', 'rouleur'), R('Bram', 'Laurent', 'rouleur')],
+  },
+  {
+    // inspiré de Cofidis : rouge, épaules blanches ; vélo rouge
+    id: 'rougevif', name: 'Rouge Vif', jersey: ['#d8121b', '#ffffff', '#111111'], pattern: 'shoulders', shorts: '#111111',
+    frame: 'climb', frameColor: '#d8121b', frameColor2: '#ffffff', wheels: 'pro55', helmet: '#d8121b',
+    riders: [R('Daan', 'Le Bihan', 'sprinter'), R('Luis', 'Morvan', 'rouleur'), R('Raúl', 'Michel', 'climber'), R('Tadeo', 'Garnier', 'rouleur'), R('Adam', 'Roussel', 'rouleur'), R('Ivan', 'Fontaine', 'climber')],
+  },
+  {
+    // inspiré de Picnic PostNL : noir, bandeau blanc, filet orange ; vélo noir
+    id: 'minuit', name: 'Orange Minuit', jersey: ['#111111', '#ffffff', '#ff6600'], pattern: 'chest', shorts: '#111111',
+    frame: 'aero', frameColor: '#111111', frameColor2: '#ff6600', wheels: 'mono60', helmet: '#111111',
+    riders: [R('Pavel', 'Gilles', 'rouleur'), R('Marek', 'Marchand', 'climber'), R('Tomás', 'Barbier', 'rouleur'), R('Aleix', 'Dumas', 'rouleur'), R('Óscar', 'Chevalier', 'climber'), R('Joao', 'Collin', 'sprinter')],
+  },
+  {
+    // inspiré de XDS Astana : turquoise, filet jaune ; vélo turquoise
+    id: 'steppe', name: 'Steppe Turquoise', jersey: ['#00a3b4', '#e6f7f8', '#ffd400'], pattern: 'gradient', shorts: '#00303a',
+    frame: 'aero', frameColor: '#00a3b4', frameColor2: '#ffd400', wheels: 'pro65', helmet: '#00a3b4',
+    riders: [R('Rui', 'Perrin', 'climber'), R('Nuno', 'Lacroix', 'rouleur'), R('Ewen', 'Mercier', 'rouleur'), R('Gwen', 'Morel', 'climber'), R('Yann', 'Leclerc', 'sprinter'), R('Malo', 'Carré', 'rouleur')],
+  },
+  {
+    // inspiré de Lotto : rouge et blanc à bandes ; vélo rouge
+    id: 'coq', name: 'Coq Rouge', jersey: ['#e30613', '#ffffff', '#111111'], pattern: 'hoops', shorts: '#111111',
+    frame: 'climb', frameColor: '#e30613', frameColor2: '#ffffff', wheels: 'pro55', helmet: '#ffffff',
+    riders: [R('Noah', 'Renaud', 'rouleur'), R('Enzo', 'Picard', 'rouleur'), R('Sacha', 'Vasseur', 'climber'), R('Timéo', 'Hamon', 'sprinter'), R('Eliott', 'Aubert', 'rouleur'), R('Gabin', 'Leroux', 'climber')],
   },
 ];
 
+/** Identifiant de l'équipe créée par le joueur (« Mon équipe »). */
+export const MY_TEAM_ID = 'mine';
+let myTeam: Team | null = null;
+
+/** Coéquipiers de l'équipe du joueur (noms inventés). */
+const MY_RIDERS: TeamRider[] = [
+  R('Alex', 'Martin', 'rouleur'), R('Sam', 'Bernard', 'climber'), R('Charlie', 'Petit', 'sprinter'),
+  R('Robin', 'Durand', 'rouleur'), R('Morgan', 'Leroy', 'climber'), R('Lou', 'Moreau', 'rouleur'),
+];
+
+/** Couleurs choisies par le joueur pour son équipe (tenue et vélo). */
+export interface MyTeamColors {
+  name: string;
+  jersey: [string, string, string];
+  pattern: Team['pattern'];
+  shorts: string;
+  helmet: string;
+  frame: FrameId;
+  frameColor: string;
+  frameColor2: string;
+  wheels: WheelId;
+}
+
+/** Construit l'équipe du joueur à partir de ses couleurs. */
+export function makeMyTeam(c: MyTeamColors): Team {
+  return { id: MY_TEAM_ID, ...c, name: c.name.trim() || 'Mon équipe', riders: MY_RIDERS };
+}
+
+/** Déclare (ou retire) l'équipe du joueur : elle devient disponible pour les courses. */
+export function setMyTeam(t: Team | null): void {
+  myTeam = t;
+}
+
 export function teamById(id: string): Team | undefined {
+  if (id === MY_TEAM_ID) return myTeam ?? undefined;
   return TEAMS.find((t) => t.id === id);
 }

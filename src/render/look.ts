@@ -9,7 +9,7 @@
  */
 import type { FrameId, WheelId } from '../physics/equipment';
 
-export type JerseyPattern = 'solid' | 'hoops' | 'diagonal' | 'chest' | 'shoulders' | 'checker' | 'polka' | 'gradient';
+export type JerseyPattern = 'solid' | 'hoops' | 'diagonal' | 'chest' | 'shoulders' | 'checker' | 'polka' | 'gradient' | 'band' | 'split';
 export type HairStyle = 'short' | 'long' | 'ponytail' | 'bald';
 export type Beard = 'none' | 'stubble' | 'full';
 export type HelmetType = 'road' | 'aero' | 'tt';

@@ -4,7 +4,7 @@
  */
 import { Engine } from '../render/engine';
 import { riderPortrait } from '../render/portrait';
-import { TEAMS, teamById } from '../data/teams';
+import { TEAMS, teamById, makeMyTeam, setMyTeam, MY_TEAM_ID } from '../data/teams';
 import { HomeScene } from '../render/homeScene';
 import { lookFromProfile, paintFor, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance, type BikePaint } from '../render/look';
 import { DeviceManager } from '../devices/manager';
@@ -489,11 +489,16 @@ export class App {
         <img id="pf-portrait" class="portrait" src="${riderPortrait(this.engine.renderer, this.look())}" alt="">
         <label>${t('pf.team')}<select id="pf-team">
           <option value="">${t('pf.team.custom')}</option>
+          <option value="${MY_TEAM_ID}" ${p.teamId === MY_TEAM_ID ? 'selected' : ''}>${t('pf.team.mine')}</option>
+          <optgroup label="${t('pf.team.pro')}">
           ${TEAMS.map((tm) => `<option value="${tm.id}" ${tm.id === p.teamId ? 'selected' : ''}>${escapeHtml(tm.name)}</option>`).join('')}
+          </optgroup>
         </select></label>
       </div>
+      <label id="pf-myteam-row" style="${p.teamId === MY_TEAM_ID ? '' : 'display:none'}">${t('pf.myTeamName')}
+        <input type="text" id="pf-myteam" maxlength="32" value="${escapeHtml(p.myTeamName)}" placeholder="${t('pf.myTeamPh')}"></label>
       <p class="hint">${t('pf.teamHint')}</p>
-      ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
+      ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'band', 'split', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
       <div class="grid3">
         ${color('pf-j1', 'pf.jersey', p.jerseyColor)}
         ${color('pf-j2', 'pf.jersey2', p.jerseyColor2)}
@@ -672,6 +677,7 @@ export class App {
       heightCm: clamp(parseFloat(val('pf-height')), 120, 220, p.heightCm),
       ftp: Math.round(clamp(parseFloat(val('pf-ftp')), 80, 600, p.ftp)),
       teamId: val('pf-team'),
+      myTeamName: val('pf-myteam').trim(),
       hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
       frame: val('pf-frame') as FrameId,
       // roues incompatibles avec le cadre (lenticulaire hors CLM, roues route sur un VTT) : on remplace
@@ -710,9 +716,13 @@ export class App {
         inp.value = e.key;
       }),
     );
-    // Choix d'une équipe : on enfile son maillot (motif, couleurs, cuissard, casque).
+    // Choix d'une équipe : on enfile son maillot (motif, couleurs, cuissard, casque) et on peint
+    // le vélo à ses couleurs. « Maillot personnalisé (sans équipe) » garde les réglages actuels.
     $<HTMLSelectElement>(this.ui, '#pf-team').addEventListener('change', (e) => {
-      const tm = teamById((e.target as HTMLSelectElement).value);
+      const id = (e.target as HTMLSelectElement).value;
+      // « Mon équipe » : on garde la tenue et le vélo actuels, que l'on règle ensuite librement
+      $(this.ui, '#pf-myteam-row').style.display = id === MY_TEAM_ID ? '' : 'none';
+      const tm = id === MY_TEAM_ID ? undefined : teamById(id);
       if (!tm) return;
       const set = (id: string, v: string) => { $<HTMLInputElement>(this.ui, `#${id}`).value = v; };
       set('pf-pattern', tm.pattern);
@@ -721,6 +731,9 @@ export class App {
       set('pf-j3', tm.jersey[2]);
       set('pf-shorts', tm.shorts);
       set('pf-hc', tm.helmet);
+      set('pf-fc', tm.frameColor);
+      set('pf-fc2', tm.frameColor2);
+      set('pf-finish', 'gloss');
     });
     // Sections repliables : on se souvient de celles qui sont ouvertes.
     this.ui.querySelectorAll<HTMLDetailsElement>('details.pf-sec').forEach((d) =>
@@ -831,8 +844,19 @@ export class App {
     return flash;
   }
 
+  /** Déclare l'équipe créée par le joueur (couleurs de sa tenue et de son vélo) pour les courses. */
+  private syncMyTeam(): void {
+    const p = this.profile;
+    setMyTeam(p.teamId !== MY_TEAM_ID ? null : makeMyTeam({
+      name: p.myTeamName, jersey: [p.jerseyColor, p.jerseyColor2, p.appearance.jerseyColor3], pattern: p.appearance.pattern,
+      shorts: p.appearance.shortsColor, helmet: p.helmetColor, frame: p.frame,
+      frameColor: p.appearance.frameColor, frameColor2: p.appearance.frameColor2, wheels: p.wheels,
+    }));
+  }
+
   private async startRide(source: RideSource): Promise<void> {
     if (this.entering) return;
+    this.syncMyTeam();
     const flash = await this.playEnterTv();
     const title = source.kind === 'gpx' ? source.route.name : source.name;
     this.ui.innerHTML = `
