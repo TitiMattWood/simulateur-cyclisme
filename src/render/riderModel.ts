@@ -754,6 +754,42 @@ function mergeStatic(group: THREE.Object3D, keepApart: Set<THREE.Object3D>): voi
 }
 
 // ---------------------------------------------------------------------------
+// Selle et cintre relevés sur la photo de profil du vélo de route (en mètres) :
+// selle par rapport à son point de serrage, cintre et cocotte par rapport au haut du cintre.
+
+/** profil de la selle (bec vers l'avant, +x) */
+const SADDLE_PROFILE: Array<[number, number]> = [[-0.148, 0.048], [-0.008, 0.047], [0.089, 0.040], [0.124, 0.029], [0.116, 0.023], [0.035, 0.003], [-0.008, 0.005], [-0.061, -0.003], [-0.105, 0.016], [-0.137, 0.035]];
+/** cocotte (corps et levier) vue de côté */
+const HOOD_PROFILE: Array<[number, number]> = [[0.105, 0.008], [0.137, 0.027], [0.169, 0.039], [0.193, 0.027], [0.185, 0.005], [0.169, -0.018], [0.174, -0.079], [0.169, -0.139], [0.153, -0.124], [0.142, -0.063], [0.121, -0.018]];
+/** axe du cintre : du haut (côté potence) jusqu'au bout du bas de cintre */
+const DROP_PATH: Array<[number, number]> = [[0.024, -0.002], [0.064, -0.005], [0.093, -0.021], [0.103, -0.063], [0.084, -0.101], [0.024, -0.124], [-0.055, -0.130]];
+
+/** Pièce plate extrudée en z, centrée sur zc. */
+function extrudeFlat(profile: Array<[number, number]>, width: number, bevel: number): THREE.ExtrudeGeometry {
+  const g = new THREE.ExtrudeGeometry(new THREE.Shape(profile.map(([x, y]) => new THREE.Vector2(x, y))), {
+    depth: Math.max(0.001, width - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8,
+    bevelOffset: -bevel * 0.8, bevelSegments: 2, curveSegments: 4,
+  });
+  g.translate(0, 0, -(width - 2 * bevel) / 2);
+  return g;
+}
+
+/** Selle : profil relevé, large à l'arrière (14 cm) et fine au bec (3 cm). */
+function saddleGeometry(): THREE.BufferGeometry {
+  const g = extrudeFlat(SADDLE_PROFILE, 0.14, 0.012);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    // demi-largeur selon la position : 7 cm à l'arrière, 1,5 cm au bec
+    const t = Math.min(1, Math.max(0, (x + 0.07) / 0.17));
+    const hw = 0.07 - 0.055 * t * t;
+    pos.setZ(i, (pos.getZ(i) / 0.07) * hw);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+// ---------------------------------------------------------------------------
 // Cadre « relevé sur photo » : contours de profil extrudés avec des bords arrondis.
 
 type UVMap = (x: number, y: number) => THREE.Vector2;
@@ -1276,11 +1312,13 @@ export class RiderModel {
       tube(mBlack, cage.clone().add(V(-0.055, -0.01)), cage.clone().add(V(0.045, 0.0)), 0.033);
       bike.add(box(mBlack, headTop.clone().add(V(-0.1, 0.012)), 0.11, 0.04, 0.045));
     }
-    // selle à bec court (rembourrage + coque)
-    bike.add(blob(mSaddle, saddle.clone().add(V(-0.04, 0.013)), 0.07, 0.019, 0.072));
-    bike.add(blob(mSaddle, saddle.clone().add(V(0.055, 0.007)), 0.075, 0.016, 0.032));
-    bike.add(blob(mBlack, saddle.clone().add(V(-0.01, 0.0)), 0.11, 0.012, 0.055));
-    bike.add(blob(mBlack, saddle.clone().add(V(-0.02, 0.031)), 0.06, 0.004, 0.01)); // canal central
+    // selle : profil relevé sur photo, rembourrage et coque d'un seul tenant
+    {
+      const sm = new THREE.Mesh(saddleGeometry(), mSaddle);
+      sm.position.copy(saddle);
+      bike.add(sm);
+      bike.add(blob(mBlack, saddle.clone().add(V(-0.01, 0.006)), 0.1, 0.01, 0.05)); // coque sous le rembourrage
+    }
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, -0.03)), saddle.clone().add(V(0.12, 0.0, -0.015)), 0.003);
     tube(mGroup, saddle.clone().add(V(-0.09, -0.005, 0.03)), saddle.clone().add(V(0.12, 0.0, 0.015)), 0.003);
 
@@ -1364,22 +1402,19 @@ export class RiderModel {
         }
         for (const side of [-1, 1]) {
           const z = side * w;
-          const curve = new THREE.CatmullRomCurve3([
-            V(barCenter.x + 0.004, barCenter.y, side * (w - 0.06)),
-            V(barCenter.x + 0.015, barCenter.y, side * (w - 0.025)),
-            V(barCenter.x + 0.065, barCenter.y - 0.005, z),
-            V(barCenter.x + 0.09, barCenter.y - 0.055, z + side * flare * 0.4),
-            V(barCenter.x + 0.065, barCenter.y - 0.12, z + side * flare),
-            V(barCenter.x - 0.02, barCenter.y - 0.128, z + side * flare),
-          ]);
+          // cintre : axe relevé sur la photo (haut du cintre → cocotte → bas de cintre), évasé en gravel
+          const pts = DROP_PATH.map(([dx, dy], i) => {
+            const f = i / (DROP_PATH.length - 1);
+            return V(barCenter.x + dx, barCenter.y + dy, i === 0 ? side * (w - 0.05) : z + side * flare * f);
+          });
+          const curve = new THREE.CatmullRomCurve3(pts);
           bike.add(new THREE.Mesh(new THREE.TubeGeometry(curve, seg(30, 14), 0.0118, seg(8, 4)), mTape));
-          // cocotte et levier
-          const hood = V(barCenter.x + 0.08, barCenter.y + 0.012, z + side * 0.002);
-          const h = blob(mBlack, hood.clone().add(V(-0.005, -0.002)), 0.042, 0.02, 0.016);
-          h.rotation.z = 0.3;
-          bike.add(h, blob(mBlack, hood.clone().add(V(0.03, 0.012)), 0.012, 0.014, 0.012));
-          tube(mGroup, hood.clone().add(V(0.025, -0.01)), hood.clone().add(V(0.02, -0.12)), 0.0055, 1.8);
-          hands.push(hood.clone().add(V(-0.005, 0.02, 0)));
+          // cocotte et levier : profil relevé sur la photo
+          const hm = new THREE.Mesh(extrudeFlat(HOOD_PROFILE, 0.032, 0.008), mBlack);
+          hm.position.set(barCenter.x, barCenter.y, z + side * 0.004);
+          bike.add(hm);
+          // main posée sur le dessus de la cocotte
+          hands.push(V(barCenter.x + 0.145, barCenter.y + 0.04, z));
         }
       }
       // Épaule : à torsoLen de la hanche et à portée de bras (coudes un peu fléchis) des mains.
@@ -1524,11 +1559,15 @@ export class RiderModel {
       rotor.position.z = -0.065;
       w.add(rotor);
       if (isRear) {
-        // cassette
-        const cas = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.055, 0.035, 20), mGroup);
-        cas.rotation.x = Math.PI / 2;
-        cas.position.z = 0.04;
-        w.add(cas);
+        // cassette : 11 pignons étagés (du plus grand, côté rayons, au plus petit), argentés
+        const mCog = shiny('#aeb3b8', 80, '#dddddd');
+        for (let k = 0; k < 11; k++) {
+          const r = 0.056 - k * 0.0029;
+          const cog = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.0018, seg(32, 16)), k % 2 ? mCog : mGroup);
+          cog.rotation.x = Math.PI / 2;
+          cog.position.z = 0.026 + k * 0.0037;
+          w.add(cog);
+        }
       }
       this.wheels.push(w);
     }
@@ -1571,12 +1610,43 @@ export class RiderModel {
     tube(mGroup, V(bb.x, bb.y, -0.07), V(bb.x, bb.y, 0.07), 0.021);
     const chainZ = 0.06;
     const cogTop = rear.clone().add(V(0, opts.trainer ? 0.04 : 0.045, chainZ));
-    const cogBot = rear.clone().add(V(0.0, -0.04, chainZ));
     const mChain = shiny('#6f757b', 40);
     tube(mChain, V(bb.x, bb.y + ringR, chainZ), cogTop, 0.0035);
-    tube(mChain, V(bb.x, bb.y - ringR, chainZ), cogBot.clone().add(V(0.01, -0.05)), 0.0035);
-    bike.add(box(mGroup, rear.clone().add(V(0.0, -0.085, 0.065)), 0.035, 0.07, 0.018)); // dérailleur arrière
-    bike.add(box(mGroup, bb.clone().lerp(seatTop, 0.2).add(V(0.03, 0, 0.035)), 0.045, 0.02, 0.012)); // dérailleur avant
+    // Dérailleur arrière (proportions relevées sur les photos) : corps accroché à la patte,
+    // parallélogramme, chape à deux flasques et deux galets ; la chaîne passe par les galets.
+    const rdZ = 0.072;
+    const upPulley = rear.clone().add(V(0.012, -0.072, rdZ));
+    const lowPulley = rear.clone().add(V(0.004, -0.152, rdZ));
+    {
+      const body = box(mGroup, rear.clone().add(V(-0.022, -0.032, rdZ + 0.006)), 0.06, 0.03, 0.022);
+      body.rotation.z = -0.55;
+      bike.add(body);
+      bike.add(box(mGroup, rear.clone().add(V(0.004, -0.052, rdZ + 0.004)), 0.032, 0.03, 0.02)); // parallélogramme
+      const cage: Array<[number, number]> = [[-0.012, -0.06], [0.03, -0.062], [0.028, -0.1], [0.022, -0.168], [0.004, -0.178], [-0.014, -0.165], [-0.016, -0.1]];
+      for (const dz of [-0.008, 0.008]) {
+        const plate = new THREE.Mesh(extrudeFlat(cage, 0.003, 0.0008), mGroup);
+        plate.position.set(rear.x, rear.y, rdZ + dz);
+        bike.add(plate);
+      }
+      for (const pc of [upPulley, lowPulley]) {
+        const pulley = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.01, seg(20, 10)), mBlack);
+        pulley.rotation.x = Math.PI / 2;
+        pulley.position.copy(pc);
+        bike.add(pulley);
+      }
+    }
+    // brin inférieur de la chaîne : plateau → galet bas → galet haut → cassette
+    tube(mChain, V(bb.x, bb.y - ringR, chainZ), lowPulley.clone().add(V(0, -0.016, 0)).setZ(chainZ), 0.0035);
+    tube(mChain, lowPulley.clone().add(V(-0.016, 0, 0)).setZ(chainZ), upPulley.clone().add(V(-0.016, 0, 0)).setZ(chainZ), 0.0035);
+    // dérailleur avant : chape incurvée devant le tube de selle, moteur électronique derrière
+    {
+      const fd = bb.clone().lerp(seatTop, 0.24).add(V(0.035, 0, 0));
+      const cagePlate: Array<[number, number]> = [[-0.03, 0.01], [0.035, 0.015], [0.03, -0.012], [-0.025, -0.016]];
+      const plate = new THREE.Mesh(extrudeFlat(cagePlate, 0.004, 0.001), mGroup);
+      plate.position.set(fd.x, fd.y, 0.07);
+      bike.add(plate);
+      bike.add(box(mGroup, fd.clone().add(V(-0.025, 0.02, 0.05)), 0.03, 0.035, 0.02)); // moteur
+    }
 
     // ----- Bidons
     const mBottle = lam(look.bottleColor);
