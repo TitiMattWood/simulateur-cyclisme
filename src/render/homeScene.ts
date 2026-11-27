@@ -30,8 +30,12 @@ type Focus = 'room' | 'rider' | 'garage';
 // En configuration, le vélo est posé de profil juste devant le garage (mur arrière) : il remplit
 // l'image, et les vélos rangés et les roues accrochées apparaissent derrière lui.
 const SHOW_BIKE = new THREE.Vector3(-1.2, 0, -0.38);
-const GARAGE_POS = new THREE.Vector3(1.05, 1.12, -0.7);
-const GARAGE_TARGET = new THREE.Vector3(-1.2, 0.6, -0.9);
+/** écart entre le cycliste debout et l'axe de son vélo (il se tient derrière, côté opposé à la caméra) */
+const HOLD_Z = 0.42;
+/** durée du trajet home trainer ↔ garage (s) */
+const WALK_TIME = 1.6;
+const GARAGE_POS = new THREE.Vector3(1.55, 1.4, -0.6);
+const GARAGE_TARGET = new THREE.Vector3(-1.25, 0.88, -0.85);
 
 /** Mesures affichées sur la TV de l'accueil. */
 export interface TvLive {
@@ -75,6 +79,10 @@ export class HomeScene implements View {
   private rider: RiderModel;
   /** vélo complet (deux roues, sans cycliste) exposé en mode configuration */
   private showBike: RiderModel | null = null;
+  /** cycliste debout qui tient son vélo par la selle */
+  private standRider: RiderModel | null = null;
+  /** 0 = sur le home trainer, 1 = vélo et cycliste devant le garage (avance avec le temps) */
+  private walk = 0;
   private look: RiderLook;
   private garage = new Garage();
   /** 0 = vue normale, 1 = vue garage (interpolé en douceur) */
@@ -169,26 +177,54 @@ export class HomeScene implements View {
   }
 
   private dropShowBike(): void {
-    if (!this.showBike) return;
-    this.scene.remove(this.showBike.root);
-    this.showBike.dispose();
+    for (const m of [this.showBike, this.standRider]) {
+      if (!m) continue;
+      this.scene.remove(m.root);
+      m.dispose();
+    }
     this.showBike = null;
+    this.standRider = null;
   }
 
   /** Mode garage : le cycliste descend du home trainer, le vélo complet est posé au sol. */
   private applyFocus(): void {
     const garage = this.focus === 'garage';
-    if (garage && !this.showBike) {
+    if ((garage || this.walk > 0) && !this.showBike) {
       this.showBike = new RiderModel(this.look, { bikeOnly: true });
-      this.showBike.root.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
-      // tourné vers le fond de la pièce : on le voit de profil côté transmission
-      this.showBike.root.position.copy(SHOW_BIKE);
-      this.showBike.root.rotation.y = Math.PI / 2;
-      this.scene.add(this.showBike.root);
+      this.standRider = new RiderModel(this.look, { standing: { holdZ: HOLD_Z } });
+      for (const m of [this.showBike, this.standRider]) {
+        m.root.traverse((o) => { if (o instanceof THREE.Mesh) o.castShadow = true; });
+        this.scene.add(m.root);
+      }
+      this.standRider.setBlobShadow(false);
     }
-    if (this.showBike) this.showBike.root.visible = garage;
-    this.rider.root.visible = !garage;
+    this.placeWalk();
   }
+
+  /**
+   * Place le vélo exposé et le cycliste debout le long du trajet home trainer → garage :
+   * le cycliste descend du vélo et le pousse jusque devant le garage (et inversement).
+   */
+  private placeWalk(): void {
+    const e = easeInOut(this.walk);
+    const out = this.walk > 0 || this.focus === 'garage';
+    this.rider.root.visible = !out;
+    if (!this.showBike || !this.standRider) return;
+    this.showBike.root.visible = out;
+    this.standRider.root.visible = out;
+    // vélo : de l'emplacement du home trainer (origine, tourné vers la TV) à l'emplacement exposé,
+    // tourné vers le fond de la pièce (vu de profil côté transmission)
+    const rot = e * (Math.PI / 2);
+    const bike = this.showBike.root;
+    bike.position.set(SHOW_BIKE.x * e, 0, SHOW_BIKE.z * e);
+    bike.rotation.y = rot;
+    // cycliste : à HOLD_Z du vélo, côté gauche du vélo (derrière lui vu de la caméra), léger balancement en marchant
+    const moving = this.walk > 0 && this.walk < 1;
+    const bob = moving ? Math.abs(Math.sin(this.walk * Math.PI * 7)) * 0.025 : 0;
+    this.standRider.root.position.set(bike.position.x - HOLD_Z * Math.sin(rot), bob, bike.position.z - HOLD_Z * Math.cos(rot));
+    this.standRider.root.rotation.y = rot;
+  }
+
 
   /** Cadrage : pièce entière, ou gros plan sur le cycliste (onglet Profil). */
   setFocus(f: Focus): void {
@@ -314,6 +350,14 @@ export class HomeScene implements View {
     }
     this.zoom += ((this.focus === 'rider' ? 1 : 0) - this.zoom) * (1 - Math.exp(-dt * 2.5));
     this.gz += ((this.focus === 'garage' ? 1 : 0) - this.gz) * (1 - Math.exp(-dt * 2.5));
+    // trajet du cycliste entre le home trainer et le garage
+    const wTarget = this.focus === 'garage' ? 1 : 0;
+    if (this.walk !== wTarget || (wTarget === 0 && this.showBike?.root.visible)) {
+      this.walk = wTarget > this.walk ? Math.min(1, this.walk + dt / WALK_TIME) : Math.max(0, this.walk - dt / WALK_TIME);
+      if (this.walk > 0 && !this.showBike) this.applyFocus();
+      this.placeWalk();
+    }
+    this.standRider?.update(dt, 0);
 
     const cam = this.camera;
     const pos = new THREE.Vector3(), target = new THREE.Vector3();

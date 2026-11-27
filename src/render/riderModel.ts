@@ -858,7 +858,14 @@ export class RiderModel {
   private limbR: number;
   private shadow: THREE.Mesh;
 
-  constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean } = {}) {
+  /** cycliste debout à côté de son vélo (mode configuration de l'accueil) */
+  private standing = false;
+
+  /**
+   * opts.standing : cycliste seul, debout à gauche du vélo (côté opposé à la transmission), la main
+   * gauche posée sur la selle ; holdZ = écart (m) entre le cycliste et l'axe du vélo.
+   */
+  constructor(look: RiderLook, opts: { trainer?: boolean; bikeOnly?: boolean; standing?: { holdZ: number } } = {}) {
     // Le vélo est toujours modélisé en style arrondi ; le cycliste suit le style choisi.
     const facetRider = look.style === 'facet';
     const useUnits = (facet: boolean) => {
@@ -1286,6 +1293,16 @@ export class RiderModel {
       }
       // Épaule : à torsoLen de la hanche et à portée de bras (coudes un peu fléchis) des mains.
       shoulder = fitShoulder(hip, hands[1].clone().sub(shOff).setZ(0), torsoLen, (upperArm + foreArm) * (geo.hands === 'flat' ? 0.88 : 0.9));
+    }
+    if (opts.standing) {
+      // Debout, jambes presque tendues, buste droit ; une main sur la selle, l'autre le long du corps.
+      this.standing = true;
+      this.hip.set(saddle.x - 0.1 * s, 0.085 + (this.thighLen + this.shinLen) * 0.985, 0);
+      shoulder = hip.clone().add(V(0.025 * s, torsoLen));
+      hands.length = 0;
+      elbows.length = 0;
+      hands.push(shoulder.clone().add(V(0.03 * s, -0.6 * s, -0.215 * s)));
+      hands.push(saddle.clone().add(V(-0.01, 0.035, opts.standing.holdZ - 0.02)));
     }
     const ta = Math.atan2(shoulder.y - hip.y, shoulder.x - hip.x);
     // potence
@@ -1753,6 +1770,10 @@ export class RiderModel {
     this.shadow.visible = !opts.trainer;
     this.root.add(this.shadow);
 
+    if (opts.standing) {
+      // cycliste seul : le vélo est dessiné à part (vélo exposé du mode configuration)
+      for (const o of this.body.children.slice(0, riderStart)) this.body.remove(o);
+    }
     if (opts.bikeOnly) {
       // vélo seul (accroché au mur de l'atelier) : on retire le cycliste
       for (const o of this.body.children.slice(riderStart)) this.body.remove(o);
@@ -1802,9 +1823,10 @@ export class RiderModel {
     const s = this.s, wm = this.limbR;
     for (const leg of this.legs) {
       const a = this.crankAngle + (leg.side > 0 ? 0 : Math.PI);
-      const z = leg.side * Q;
-      const pedal = this.pedalAt(this.bb, a, z);
-      const ankle = this.ankleAt(this.bb, a, z);
+      const z = this.standing ? leg.side * 0.11 * s : leg.side * Q;
+      // debout : pieds à plat au sol sous la hanche ; sinon sur les pédales
+      const pedal = this.standing ? V(this.hip.x + 0.07 * s, 0.006, z) : this.pedalAt(this.bb, a, z);
+      const ankle = this.standing ? V(this.hip.x + 0.005, 0.085, z) : this.ankleAt(this.bb, a, z);
       const hip = V(this.hip.x, this.hip.y, leg.side * 0.095 * s * wm);
       const knee = solve2(hip, ankle, this.thighLen, this.shinLen, 1);
       knee.z = leg.side * 0.105 * s * wm;
@@ -1825,7 +1847,7 @@ export class RiderModel {
       leg.ankle.position.copy(ankle);
       leg.ankle.scale.setScalar(0.031 * s);
       leg.foot.position.copy(pedal);
-      leg.foot.rotation.z = -RiderModel.pitch(a);
+      leg.foot.rotation.z = this.standing ? 0 : -RiderModel.pitch(a);
     }
   }
 
