@@ -313,7 +313,15 @@ export class HomeScene implements View {
       if (this.anim) return;
       e.preventDefault();
       start();
-      this.manual.dist = Math.min(4.2, Math.max(1.2, this.manual.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+      // trackpad : glisser à deux doigts horizontalement fait tourner autour du cycliste ;
+      // vertical (ou pincer, signalé avec ctrlKey) zoome. Molette de souris : zoom par crans.
+      const px = e.deltaMode === 1 ? 16 : 1;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        this.manual.yaw -= e.deltaX * px * 0.004;
+      } else {
+        const k = e.ctrlKey ? 0.01 : 0.0015;
+        this.manual.dist = Math.min(4.2, Math.max(1.2, this.manual.dist * Math.exp(e.deltaY * px * k)));
+      }
     }, { passive: false });
     canvas.addEventListener('dblclick', () => { this.manual.idle = 99; });
     canvas.style.cursor = 'grab';
