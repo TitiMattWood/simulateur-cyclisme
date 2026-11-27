@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { ROAD_PERIOD, roadU, FACADE } from './textures';
 import {
-  MeshBuilder, geoToPolys, geoToLines, pointInPoly, polyArea, sampleGrid, rng, hashString,
+  MeshBuilder, geoToPolys, geoToLines, pointInPoly, polyArea, sampleGrid, rng, hashString, orientedRect,
   type HeightGrid, type Poly, type RGB,
 } from './geometry';
 import { hexLinear } from '../render/engine';
@@ -30,6 +30,8 @@ const inTile = (b: TileBounds, x: number, z: number) => x >= b.x0 && x < b.x1 &&
 
 /** Teintes d'enduit (crème, ocre clair, rose pâle, gris clair…) pour les façades enduites. */
 const RENDERS = ['#f3ead8', '#efe0c4', '#f0d9c6', '#e7dccd', '#f5f1e8', '#e9d2b4', '#dfe3e0', '#f1e1d0', '#e8d9bf', '#ece6dc'];
+/** Quelques façades franches (jaune, saumon, rouge brique, bleu-gris), en minorité. */
+const BOLD_RENDERS = ['#efd27a', '#e9a27e', '#c8604c', '#b9c6d2', '#f0c9a0'];
 /** Teintes des bardages de hangars. */
 const CLADDING = ['#d7dbde', '#b9c7cf', '#c9c2b4', '#a9b8a6', '#c7cfd6'];
 const ROOF_TILES = ['#a5482f', '#b4553c', '#8e3f2b', '#9a5a3e', '#a34d38'];
@@ -82,7 +84,10 @@ export function chooseFacade(props: Record<string, unknown>, h: number, area: nu
     const shops = h > 12 && r() < 0.35;
     return { upper: FACADE.balcons, ground: shops ? FACADE.vitrine : FACADE.balcons, tint: pick(RENDERS, r()) };
   }
-  return same(FACADE.pavillon, pick(RENDERS, r()));
+  // maisons : volets de couleur variée, colombages pour une partie des maisons anciennes
+  if ((year > 0 && year < 1800) || r() < 0.04) return same(FACADE.colombage, near('#ffffff'));
+  const shutters = [FACADE.pavillon, FACADE.voletsBleus, FACADE.voletsVerts];
+  return same(pick(shutters, r()), r() < 0.18 ? pick(BOLD_RENDERS, r()) : pick(RENDERS, r()));
 }
 
 /** Couleur de toiture d'après le matériau BD TOPO (1 tuiles, 2 ardoise, 3 zinc, 4 béton). */
@@ -146,6 +151,19 @@ class WallBuilder {
   }
 }
 
+/** Boîte orientée (axe ex/ez), centrée en (x, z), de y0 à y1 : cheminées, souches. */
+function boxAt(mb: MeshBuilder, x: number, z: number, ex: number, ez: number, w: number, d: number, y0: number, y1: number, c: RGB): void {
+  const fx = -ez, fz = ex;
+  const P = (sw: number, sd: number, y: number) => [x + ex * sw * w / 2 + fx * sd * d / 2, y, z + ez * sw * w / 2 + fz * sd * d / 2];
+  const corners: Array<[number, number]> = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  for (let i = 0; i < 4; i++) {
+    const [s0, d0] = corners[i], [s1, d1] = corners[(i + 1) % 4];
+    const out: [number, number, number] = [ex * (s0 + s1) + fx * (d0 + d1), 0, ez * (s0 + s1) + fz * (d0 + d1)];
+    mb.quad(P(s0, d0, y0), P(s1, d1, y0), P(s1, d1, y1), P(s0, d0, y1), c, out);
+  }
+  mb.quad(P(-1, -1, y1), P(1, -1, y1), P(1, 1, y1), P(-1, 1, y1), c, [0, 1, 0]);
+}
+
 /** Bâtiments d'une tuile : murs à façades texturées + toits (couleurs par sommet). */
 export interface Buildings {
   walls: THREE.BufferGeometry | null;
@@ -186,8 +204,23 @@ export function buildBuildings(
     if (polyArea(ring) > 0) ring = ring.slice().reverse();
 
     const church = /glise|Chapelle/.test(nature);
-    const pitched = !church && ring.length === 4 && h <= 13 && area < 600 && usage !== 'Industriel' && usage !== 'Commercial et services';
-    const roofH = pitched ? Math.min(4, 0.42 * Math.sqrt(area) * 0.5) : 0;
+    // Maisons et petits immeubles au contour presque rectangulaire (la BD TOPO ajoute souvent
+    // des décrochements de quelques dizaines de centimètres) : on les redessine en vrai rectangle
+    // de même aire, coiffé d'un toit à deux ou quatre pans, comme dans un décor low-poly net.
+    const house = !church && (usage === 'Résidentiel' || usage === 'Indifférencié') && h <= 14 && area < 900;
+    if (house && ring.length > 4) {
+      const ob = orientedRect(ring);
+      const fill = area / ob.area;
+      if (fill >= 0.75) {
+        const k = Math.sqrt(fill);
+        const mx = ob.corners.reduce((sum, c) => sum + c[0], 0) / 4, mz = ob.corners.reduce((sum, c) => sum + c[1], 0) / 4;
+        ring = ob.corners.map(([x, z]): [number, number] => [mx + (x - mx) * k, mz + (z - mz) * k]);
+        if (polyArea(ring) > 0) ring = ring.slice().reverse();
+      }
+    }
+    const pitched = !church && ring.length === 4
+      && (house || (h <= 13 && area < 600 && usage !== 'Industriel' && usage !== 'Commercial et services'));
+    const roofH = pitched ? Math.min(4.5, 0.25 * Math.min(Math.sqrt(area), 14) + 0.6) : 0;
     const eaves = base + 1 + h - roofH;
     const choice = chooseFacade(props, h, area, r);
     // de 1 à 9 cm selon le bâtiment (invisible, mais supprime le scintillement des murs confondus)
@@ -238,14 +271,39 @@ export function buildBuildings(
         const m1 = M1.slice(), m2 = M2.slice();
         M1 = [m1[0] + (m2[0] - m1[0]) * k, top, m1[2] + (m2[2] - m1[2]) * k];
         M2 = [m2[0] + (m1[0] - m2[0]) * k, top, m2[2] + (m1[2] - m2[2]) * k];
-        mb.tri(b[0], b[1], b[2], c[0], c[1], c[2], M2[0], M2[1], M2[2], roof2, up);
-        mb.tri(d[0], d[1], d[2], a[0], a[1], a[2], M1[0], M1[1], M1[2], roof2, up);
       } else {
         wb.gable(b, c, M2, ground, floorH, tint);
         wb.gable(d, a, M1, ground, floorH, tint);
       }
-      mb.quad(a, b, M2, M1, roof, up);
-      mb.quad(c, d, M1, M2, roof2, up);
+      // Débord de toit (35 cm) : les pans dépassent des murs, avec une sous-face sombre.
+      const o = 0.35;
+      const lx = B[0] - A[0], lz = B[1] - A[1], ll = Math.hypot(lx, lz) || 1;
+      const ex = lx / ll, ez = lz / ll; // le long du faîtage
+      const sx = D[0] - A[0], sz = D[1] - A[1], sl = Math.hypot(sx, sz) || 1;
+      const fx = sx / sl, fz = sz / sl; // en travers
+      const drop = (roofH / (sl / 2)) * o;
+      const ov = (pt: number[], ke: number, kf: number) => [pt[0] + (ex * ke + fx * kf) * o, eaves - drop, pt[2] + (ez * ke + fz * kf) * o];
+      const a2 = ov(a, -1, -1), b2 = ov(b, 1, -1), c2 = ov(c, 1, 1), d2 = ov(d, -1, 1);
+      const R1 = hip ? M1 : [M1[0] - ex * o, top, M1[2] - ez * o];
+      const R2 = hip ? M2 : [M2[0] + ex * o, top, M2[2] + ez * o];
+      mb.quad(a2, b2, R2, R1, roof, up);
+      mb.quad(c2, d2, R1, R2, roof2, up);
+      if (hip) {
+        mb.tri(b2[0], b2[1], b2[2], c2[0], c2[1], c2[2], R2[0], R2[1], R2[2], roof2, up);
+        mb.tri(d2[0], d2[1], d2[2], a2[0], a2[1], a2[2], R1[0], R1[1], R1[2], roof2, up);
+      }
+      const soffit: RGB = [roof[0] * 0.35, roof[1] * 0.35, roof[2] * 0.35];
+      const downF: [number, number, number] = [0, -1, 0];
+      mb.quad(a2, b2, R2, R1, soffit, downF);
+      mb.quad(c2, d2, R1, R2, soffit, downF);
+      // Cheminée sur une partie des maisons, posée sur le faîtage.
+      if (r() < 0.6) {
+        const t = 0.2 + r() * 0.6;
+        const px = M1[0] + (M2[0] - M1[0]) * t + fx * 0.4, pz = M1[2] + (M2[2] - M1[2]) * t + fz * 0.4;
+        const brick = r() < 0.5 ? hexLinear('#9c4b36') : tint;
+        boxAt(mb, px, pz, ex, ez, 0.62, 0.62, top - 1.2, top + 0.9, brick);
+        boxAt(mb, px, pz, ex, ez, 0.72, 0.72, top + 0.9, top + 1.02, hexLinear('#6f6a63'));
+      }
     } else {
       // Toit plat triangulé (ou pointe pour les églises).
       const roof = hexLinear(church ? '#55606c' : roofColor(props, r, true));

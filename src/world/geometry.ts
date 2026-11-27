@@ -141,6 +141,34 @@ export interface HeightGrid {
   h: Float32Array;
 }
 
+/**
+ * Plus petit rectangle orienté contenant un contour (méthode des « pieds à coulisse » :
+ * un des côtés du rectangle est toujours aligné sur un côté du contour).
+ * Renvoie les 4 coins dans l'ordre et l'aire du rectangle.
+ */
+export function orientedRect(ring: Array<[number, number]>): { corners: Array<[number, number]>; area: number } {
+  let best = { area: Infinity, corners: [] as Array<[number, number]> };
+  for (let i = 0; i < ring.length; i++) {
+    const [ax, az] = ring[i], [bx, bz] = ring[(i + 1) % ring.length];
+    const l = Math.hypot(bx - ax, bz - az);
+    if (l < 1e-6) continue;
+    const ux = (bx - ax) / l, uz = (bz - az) / l; // axe du côté
+    const vx = -uz, vz = ux; // axe perpendiculaire
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, z] of ring) {
+      const u = x * ux + z * uz, v = x * vx + z * vz;
+      if (u < u0) u0 = u; if (u > u1) u1 = u;
+      if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }
+    const area = (u1 - u0) * (v1 - v0);
+    if (area < best.area) {
+      const P = (u: number, v: number): [number, number] => [u * ux + v * vx, u * uz + v * vz];
+      best = { area, corners: [P(u0, v0), P(u1, v0), P(u1, v1), P(u0, v1)] };
+    }
+  }
+  return best;
+}
+
 /** Altitude interpolée dans la grille (bornée aux bords de la tuile). */
 export function sampleGrid(g: HeightGrid, x: number, z: number): number {
   const n = g.res;

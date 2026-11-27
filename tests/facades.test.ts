@@ -8,8 +8,11 @@ describe('façades selon la BD TOPO', () => {
   it('pavillon en meulière (code 2) → meulière', () => {
     expect(chooseFacade({ usage_1: 'Résidentiel', materiaux_des_murs: '20', nombre_de_logements: 1 }, 7, 90, r).upper).toBe(FACADE.meuliere);
   });
-  it('pavillon enduit → pavillon à volets', () => {
-    expect(chooseFacade({ usage_1: 'Résidentiel', materiaux_des_murs: '50', nombre_de_logements: 1, date_d_apparition: '1978-01-01Z' }, 6, 90, r).upper).toBe(FACADE.pavillon);
+  it('pavillon enduit → pavillon à volets (couleur de volets variée, parfois colombages)', () => {
+    const house = [FACADE.pavillon, FACADE.voletsBleus, FACADE.voletsVerts, FACADE.colombage];
+    for (let i = 0; i < 20; i++) {
+      expect(house).toContain(chooseFacade({ usage_1: 'Résidentiel', materiaux_des_murs: '50', nombre_de_logements: 1, date_d_apparition: '1978-01-01Z' }, 6, 90, r).upper);
+    }
   });
   it('immeuble de logements → balcons', () => {
     expect(chooseFacade({ usage_1: 'Résidentiel', nombre_de_logements: 40 }, 25, 600, r).upper).toBe(FACADE.balcons);
