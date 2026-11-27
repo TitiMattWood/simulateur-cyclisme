@@ -65,6 +65,30 @@ export interface Appearance {
   computer: boolean;
   /** serviette sur le cintre (visible seulement sur le home trainer de l'accueil) */
   towel: boolean;
+  /** coloris propre à chaque vélo du garage (chaque vélo garde sa couleur quand on change de vélo) */
+  paints?: Partial<Record<FrameId, BikePaint>>;
+}
+
+/** Coloris d'un vélo. */
+export interface BikePaint {
+  frameColor: string;
+  frameColor2: string;
+  finish: Finish;
+  tireWall: TireWall;
+}
+
+/** Coloris d'origine des vélos (d'après les photos de référence). */
+export const DEFAULT_PAINTS: Record<FrameId, BikePaint> = {
+  climb: { frameColor: '#eef0f0', frameColor2: '#2a2c30', finish: 'gloss', tireWall: 'tan' },
+  aero: { frameColor: '#6d6e6b', frameColor2: '#b9b5a8', finish: 'matte', tireWall: 'black' },
+  gravel: { frameColor: '#b0121d', frameColor2: '#f2f2f2', finish: 'gloss', tireWall: 'tan' },
+  tt: { frameColor: '#e9e7ee', frameColor2: '#1c1d20', finish: 'gloss', tireWall: 'black' },
+  mtb: { frameColor: '#22313f', frameColor2: '#e94b2b', finish: 'matte', tireWall: 'black' },
+};
+
+/** Coloris d'un vélo : celui choisi au profil pour ce vélo, sinon celui d'origine. */
+export function paintFor(a: Pick<Appearance, 'paints'>, frame: FrameId): BikePaint {
+  return a.paints?.[frame] ?? DEFAULT_PAINTS[frame];
 }
 
 /** Teints proposés, du plus clair au plus foncé. */

@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import { RiderModel } from './riderModel';
-import { defaultAppearance, type RiderLook } from './look';
+import { defaultAppearance, paintFor, type RiderLook } from './look';
 import { WHEELS, type FrameId, type WheelId } from '../physics/equipment';
 
 /** Mur arrière de la pièce (repère commun des décors : le vélo du home trainer à l'origine). */
@@ -29,19 +29,13 @@ const WALL_STEP = 0.56;
 const ROW_Y = [2.28, 1.52];
 
 /** Coloris des vélos rangés (d'après les photos de référence : route blanc, aéro gris mat…). */
-const STORED: Record<FrameId, Partial<RiderLook>> = {
-  climb: { frameColor: '#eef0f0', frameColor2: '#2a2c30', finish: 'gloss', tireWall: 'tan', wheels: 'c45' },
-  aero: { frameColor: '#6d6e6b', frameColor2: '#b9b5a8', finish: 'matte', tireWall: 'black', wheels: 'c55' },
-  gravel: { frameColor: '#b0121d', frameColor2: '#f2f2f2', finish: 'gloss', tireWall: 'tan', wheels: 'c30' },
-  tt: { frameColor: '#e9e7ee', frameColor2: '#1c1d20', finish: 'gloss', tireWall: 'black', wheels: 'c88' },
-  mtb: { frameColor: '#22313f', frameColor2: '#e94b2b', finish: 'matte', tireWall: 'black', wheels: 'alu' },
-};
+const STORED_WHEELS: Record<FrameId, WheelId> = { climb: 'c45', aero: 'c55', gravel: 'c30', tt: 'c88', mtb: 'alu' };
 
 export class Garage {
   readonly group = new THREE.Group();
   private bikes = new Map<FrameId, RiderModel>();
   private wheels = new Map<WheelId, THREE.Group>();
-  private style: RiderLook['style'] | null = null;
+  private key = '';
 
   constructor() {
     // rail de rangement au sol (les roues avant s'y calent) et barre d'accroche des roues
@@ -61,20 +55,21 @@ export class Garage {
 
   /** Met le garage en accord avec le vélo et les roues choisis (emplacements vides). */
   update(look: RiderLook): void {
-    if (this.style !== look.style) this.rebuild(look.style);
+    const key = `${look.style}|${JSON.stringify(look.paints ?? {})}`;
+    if (this.key !== key) { this.key = key; this.rebuild(look); }
     for (const [f, m] of this.bikes) m.root.visible = f !== look.frame;
     for (const [w, g] of this.wheels) g.visible = w !== look.wheels;
   }
 
-  private rebuild(style: RiderLook['style']): void {
-    this.style = style;
+  private rebuild(src: RiderLook): void {
+    const style = src.style;
     for (const m of this.bikes.values()) { this.group.remove(m.root); m.dispose(); }
     this.bikes.clear();
     RACK.forEach((f, i) => {
       const look: RiderLook = {
-        ...defaultAppearance(f), style, heightCm: 178, weightKg: 72, frame: f, wheels: 'c40',
+        ...defaultAppearance(f), style, heightCm: 178, weightKg: 72, frame: f,
         jerseyColor: '#000', jerseyColor2: '#000', helmetColor: '#000', overshoes: false, bottles: 0, computer: false,
-        ...STORED[f],
+        ...paintFor(src, f), wheels: STORED_WHEELS[f],
       };
       const m = new RiderModel(look, { bikeOnly: true });
       // tourné vers le mur : roue avant contre le mur, roue arrière vers la pièce

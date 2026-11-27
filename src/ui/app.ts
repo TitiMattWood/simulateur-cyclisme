@@ -6,7 +6,7 @@ import { Engine } from '../render/engine';
 import { riderPortrait } from '../render/portrait';
 import { TEAMS, teamById } from '../data/teams';
 import { HomeScene } from '../render/homeScene';
-import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance } from '../render/look';
+import { lookFromProfile, paintFor, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance, type BikePaint } from '../render/look';
 import { DeviceManager } from '../devices/manager';
 import type { SensorKind } from '../devices/ble';
 import { FtmsTrainer } from '../devices/sensors';
@@ -71,6 +71,8 @@ export class App {
   private message = '';
   /** sections du profil dépliées */
   private pfOpen = new Set<string>(['rider', 'kit']);
+  /** coloris modifiés pendant l'édition du profil, par vélo (pas encore enregistrés) */
+  private pfPaints: Partial<Record<FrameId, BikePaint>> = {};
   /** une nouvelle version est en ligne */
   private updateReady = false;
   /** vrai pendant l'animation d'entrée dans la TV */
@@ -643,6 +645,15 @@ export class App {
       computer: chk('pf-computer'),
       towel: chk('pf-towel'),
       forkColor: chk('pf-forkon') ? val('pf-fork') : '',
+      // le coloris saisi appartient au vélo affiché ; les autres vélos gardent le leur
+      paints: {
+        ...p.appearance.paints,
+        ...this.pfPaints,
+        [val('pf-frame') as FrameId]: {
+          frameColor: val('pf-fc'), frameColor2: val('pf-fc2'),
+          finish: val('pf-finish') as Appearance['finish'], tireWall: val('pf-tirewall') as Appearance['tireWall'],
+        },
+      },
       room: val('pf-room') as Appearance['room'],
       style: val('pf-style') as Appearance['style'],
       neonOn: chk('pf-neonon'),
@@ -716,10 +727,26 @@ export class App {
     );
     // Aperçu en direct : chaque modification redessine l'avatar (au plus une fois par image).
     let pending = 0;
+    let shownFrame = this.profile.frame;
+    this.pfPaints = {};
     const preview = () => {
       if (pending) return;
       pending = requestAnimationFrame(() => {
         pending = 0;
+        // changement de vélo : on enregistre le coloris de l'ancien et on affiche celui du nouveau
+        const frameNow = $<HTMLSelectElement>(this.ui, '#pf-frame').value as FrameId;
+        if (frameNow !== shownFrame) {
+          const paint = paintFor({ paints: { ...this.profile.appearance.paints, ...this.pfPaints } }, frameNow);
+          this.pfPaints = { ...this.pfPaints, [shownFrame]: {
+            frameColor: $<HTMLInputElement>(this.ui, '#pf-fc').value, frameColor2: $<HTMLInputElement>(this.ui, '#pf-fc2').value,
+            finish: $<HTMLSelectElement>(this.ui, '#pf-finish').value as Appearance['finish'],
+            tireWall: $<HTMLSelectElement>(this.ui, '#pf-tirewall').value as Appearance['tireWall'] } };
+          $<HTMLInputElement>(this.ui, '#pf-fc').value = paint.frameColor;
+          $<HTMLInputElement>(this.ui, '#pf-fc2').value = paint.frameColor2;
+          $<HTMLSelectElement>(this.ui, '#pf-finish').value = paint.finish;
+          $<HTMLSelectElement>(this.ui, '#pf-tirewall').value = paint.tireWall;
+          shownFrame = frameNow;
+        }
         const draft = this.readProfileForm();
         // roues proposées selon le cadre choisi, et leurs effets sur ce cadre
         const ws = $<HTMLSelectElement>(this.ui, '#pf-wheels');
