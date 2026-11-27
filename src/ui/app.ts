@@ -3,6 +3,8 @@
  * historique), écran de chargement, menu pause et bilan de fin de sortie.
  */
 import { Engine } from '../render/engine';
+import { riderPortrait } from '../render/portrait';
+import { TEAMS, teamById } from '../data/teams';
 import { HomeScene } from '../render/homeScene';
 import { lookFromProfile, SKIN_TONES, HAIR_COLORS, type RiderLook, type Appearance } from '../render/look';
 import { DeviceManager } from '../devices/manager';
@@ -19,6 +21,8 @@ import { encodeFit } from '../export/fit';
 import { encodeGpx } from '../export/gpx';
 import { downloadFile, safeFilename } from '../export/download';
 import { levelFromXp } from '../ride/metrics';
+import { DIFFICULTY_RANGE, type Difficulty } from '../ride/ai/roster';
+import { MAX_AI } from '../ride/ai/peloton';
 import { buildParams, steadySpeed, airDensity, crrFor, type RiderSetup } from '../physics/model';
 import { CAM_MODES } from '../render/cameras';
 import { ROUTES, type RouteEntry, type WorldId } from '../data/routes';
@@ -170,6 +174,14 @@ export class App {
   }
 
   private go(): void {
+    // la FTP sert de base à tout (niveau des adversaires, cible de watts) : profil obligatoire
+    if (this.setup.mode !== 'free' && !this.profile.configured) {
+      this.tab = 'profile';
+      this.pfOpen.add('rider');
+      this.message = t('pf.ftpRequired');
+      this.renderHome();
+      return;
+    }
     const sel = this.selection;
     if (sel) {
       const gpx = parseGpx(sel.gpx, sel.name);
@@ -220,7 +232,7 @@ export class App {
       </div>`;
     const settings = su.mode === 'group' ? `
       <div class="mode-settings">
-        <label>${t('setup.riders', { n: su.riders })}<input type="range" id="su-riders" min="1" max="10" value="${su.riders}"></label>
+        <label>${t('setup.riders', { n: su.riders, total: su.riders + 1 })}<input type="range" id="su-riders" min="1" max="${MAX_AI}" value="${su.riders}"></label>
         <label>${t('setup.pace', { p: Math.round(su.pace * 100), w: Math.round(su.pace * this.profile.ftp) })}<input type="range" id="su-pace" min="50" max="90" step="5" value="${Math.round(su.pace * 100)}"></label>
         <label class="check"><input type="checkbox" id="su-wait" ${su.wait ? 'checked' : ''}> ${t('setup.wait')}</label>
         <label class="check"><input type="checkbox" id="su-relay" ${su.relay ? 'checked' : ''}> ${t('setup.relay')}</label>
@@ -228,8 +240,8 @@ export class App {
         ${wind}
       </div>` : su.mode === 'race' ? `
       <div class="mode-settings">
-        <div class="seg">${([0.8, 1, 1.15] as const).map((l) => `<button data-level="${l}" class="${su.level === l ? 'sel' : ''}">${t(`level.${l === 0.8 ? 'easy' : l === 1 ? 'mid' : 'hard'}` as I18nKey)}<small>${Math.round(l * 100)} % FTP</small></button>`).join('')}</div>
-        <label>${t('setup.rivals', { n: su.riders })}<input type="range" id="su-riders" min="1" max="10" value="${su.riders}"></label>
+        <div class="seg">${(Object.keys(DIFFICULTY_RANGE) as Difficulty[]).map((d) => `<button data-level="${d}" class="${su.difficulty === d ? 'sel' : ''}">${t(`level.${d}` as I18nKey)}<small>${Math.round(DIFFICULTY_RANGE[d][0] * 100)}–${Math.round(DIFFICULTY_RANGE[d][1] * 100)} % FTP</small></button>`).join('')}</div>
+        <label>${t('setup.rivals', { n: su.riders, total: su.riders + 1 })}<input type="range" id="su-riders" min="1" max="${MAX_AI}" value="${su.riders}"></label>
         <label>${t('setup.raceKm')}<select id="su-km">${opt([5, 10, 20, 30, 40] as const, su.raceKm as 5, (v) => `${v} km`)}</select></label>
         <p class="hint">${t('setup.raceHint')}</p>
         ${wind}
@@ -303,7 +315,7 @@ export class App {
       el.addEventListener('click', () => saveSetup({ mode: el.dataset.mode as RideMode })),
     );
     this.ui.querySelectorAll<HTMLElement>('[data-level]').forEach((el) =>
-      el.addEventListener('click', () => saveSetup({ level: Number(el.dataset.level) as RideSetup['level'] })),
+      el.addEventListener('click', () => saveSetup({ difficulty: el.dataset.level as Difficulty })),
     );
     const range = (id: string, apply: (v: number) => Partial<RideSetup>) => {
       const el = $<HTMLInputElement>(this.ui, `#${id}`);
@@ -312,7 +324,7 @@ export class App {
         const lbl = el.parentElement!.firstChild!;
         lbl.textContent = id === 'su-pace'
           ? t('setup.pace', { p: el.value, w: Math.round((Number(el.value) / 100) * this.profile.ftp) })
-          : t(this.setup.mode === 'race' ? 'setup.rivals' : 'setup.riders', { n: el.value });
+          : t(this.setup.mode === 'race' ? 'setup.rivals' : 'setup.riders', { n: el.value, total: Number(el.value) + 1 });
       });
     };
     range('su-riders', (v) => ({ riders: v }));
@@ -460,7 +472,7 @@ export class App {
       <div class="grid2">
         ${num('pf-weight', 'pf.weight', p.weightKg, 30, 200, 0.5)}
         ${num('pf-height', 'pf.height', p.heightCm, 120, 220)}
-        ${num('pf-ftp', 'pf.ftp', p.ftp, 50, 600)}
+        ${num('pf-ftp', 'pf.ftp', p.ftp, 80, 600)}
         ${num('pf-hrmax', 'pf.hrmax', p.hrMax, 100, 230)}
       </div>
       ${swatches('pf-skin', 'pf.skin', SKIN_TONES, a.skin)}
@@ -471,6 +483,14 @@ export class App {
       ${swatches('pf-haircolor', 'pf.hairColor', HAIR_COLORS, a.hairColor)}`;
 
     const kit = `
+      <div class="team-pick">
+        <img id="pf-portrait" class="portrait" src="${riderPortrait(this.engine.renderer, this.look())}" alt="">
+        <label>${t('pf.team')}<select id="pf-team">
+          <option value="">${t('pf.team.custom')}</option>
+          ${TEAMS.map((tm) => `<option value="${tm.id}" ${tm.id === p.teamId ? 'selected' : ''}>${escapeHtml(tm.name)}</option>`).join('')}
+        </select></label>
+      </div>
+      <p class="hint">${t('pf.teamHint')}</p>
       ${sel('pf-pattern', 'pf.pattern', ['solid', 'hoops', 'diagonal', 'chest', 'shoulders', 'checker', 'polka', 'gradient'] as const, a.pattern, tr('pat'))}
       <div class="grid3">
         ${color('pf-j1', 'pf.jersey', p.jerseyColor)}
@@ -631,7 +651,8 @@ export class App {
       name: val('pf-name').trim(),
       weightKg: clamp(parseFloat(val('pf-weight')), 30, 200, p.weightKg),
       heightCm: clamp(parseFloat(val('pf-height')), 120, 220, p.heightCm),
-      ftp: clamp(parseFloat(val('pf-ftp')), 50, 600, p.ftp),
+      ftp: Math.round(clamp(parseFloat(val('pf-ftp')), 80, 600, p.ftp)),
+      teamId: val('pf-team'),
       hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
       frame: val('pf-frame') as FrameId,
       wheels: val('pf-wheels') as WheelId,
@@ -668,6 +689,18 @@ export class App {
         inp.value = e.key;
       }),
     );
+    // Choix d'une équipe : on enfile son maillot (motif, couleurs, cuissard, casque).
+    $<HTMLSelectElement>(this.ui, '#pf-team').addEventListener('change', (e) => {
+      const tm = teamById((e.target as HTMLSelectElement).value);
+      if (!tm) return;
+      const set = (id: string, v: string) => { $<HTMLInputElement>(this.ui, `#${id}`).value = v; };
+      set('pf-pattern', tm.pattern);
+      set('pf-j1', tm.jersey[0]);
+      set('pf-j2', tm.jersey[1]);
+      set('pf-j3', tm.jersey[2]);
+      set('pf-shorts', tm.shorts);
+      set('pf-hc', tm.helmet);
+    });
     // Sections repliables : on se souvient de celles qui sont ouvertes.
     this.ui.querySelectorAll<HTMLDetailsElement>('details.pf-sec').forEach((d) =>
       d.addEventListener('toggle', () => {
@@ -774,6 +807,7 @@ export class App {
     const ride = new RideView(source, this.profile, this.devices, QUALITY[this.profile.quality], overlay, {
       onPauseMenu: () => this.showPause(),
       onFinish: (summary, samples, ranking) => this.showReport(summary, samples, ranking),
+      portrait: (look) => riderPortrait(this.engine.renderer, look),
     }, this.setup);
     ride.scene.environment = this.engine.environment();
     ride.scene.environmentIntensity = 0.45;
@@ -907,7 +941,7 @@ export class App {
         <dl>${rows.map(([k, v]) => `<div><dt>${t(k)}</dt><dd>${v}</dd></div>`).join('')}</dl>
         ${ranking.length && this.setup.mode === 'race' ? `
           <h4>${t('rep.podium')}</h4>
-          <ol class="podium">${ranking.map((r, i) => `<li class="${r.isPlayer ? 'me' : ''}"><b>${i + 1}. ${escapeHtml(r.name)}</b><span>${escapeHtml(r.team)}${r.finishTime !== null ? ` · ${fmtTime(r.finishTime)}` : ''}</span></li>`).join('')}</ol>` : ''}
+          <ol class="podium">${ranking.map((r, i) => `<li class="${r.isPlayer ? 'me' : ''}">${r.portrait ? `<img class="pod-pic" src="${r.portrait}" alt="" style="--tc:${escapeHtml(r.teamColor || '#888')}">` : ''}<b>${i + 1}. ${escapeHtml(r.name)}</b><span>${escapeHtml(r.team)}${r.finishTime !== null ? ` · ${fmtTime(r.finishTime)}` : ''}</span></li>`).join('')}</ol>` : ''}
         <div class="row">
           <button class="primary" data-act="fit">${t('rep.fit')}</button>
           <button data-act="gpx">${t('rep.gpx')}</button>

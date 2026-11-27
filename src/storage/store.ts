@@ -12,6 +12,18 @@ import type { QualityLevel } from '../config';
 import type { Lang } from '../i18n';
 import { defaultAppearance, type Appearance } from '../render/look';
 import { defaultSetup, type RideSetup } from '../ride/setup';
+import type { Difficulty } from '../ride/ai/roster';
+import { MAX_AI } from '../ride/ai/peloton';
+
+/** Ancien réglage « niveau » (fraction de la FTP du joueur) → difficulté par plage. */
+function migrateSetup(raw: Partial<RideSetup> & { level?: number }): Partial<RideSetup> {
+  const { level, ...rest } = raw;
+  // 30 coureurs au plus au départ, joueur compris
+  if (typeof rest.riders === 'number') rest.riders = Math.max(1, Math.min(MAX_AI, rest.riders));
+  if (rest.difficulty || typeof level !== 'number') return rest;
+  const difficulty: Difficulty = level < 0.9 ? 'easy' : level > 1.05 ? 'strong' : 'equal';
+  return { ...rest, difficulty };
+}
 
 export interface Profile {
   name: string;
@@ -25,6 +37,8 @@ export interface Profile {
   jerseyColor: string;
   jerseyColor2: string;
   helmetColor: string;
+  /** équipe du joueur (src/data/teams.ts) ; '' = maillot personnalisé */
+  teamId: string;
   /** apparence détaillée : cycliste, tenue, vélo (voir render/look.ts) */
   appearance: Appearance;
   /** derniers réglages de sortie (mode, groupe, course, vent) */
@@ -70,6 +84,7 @@ export function defaultProfile(): Profile {
     jerseyColor: '#e4572e',
     jerseyColor2: '#1d3557',
     helmetColor: '#f1faee',
+    teamId: '',
     appearance: defaultAppearance(),
     rideSetup: defaultSetup(),
     lang: 'fr',
@@ -110,7 +125,7 @@ function normalize(raw: unknown): SaveData {
       kit: { ...base.profile.kit, ...(r.profile?.kit ?? {}) },
       drivetrain: { ...base.profile.drivetrain, ...(r.profile?.drivetrain ?? {}) },
       appearance: { ...base.profile.appearance, ...migrated, ...(rp.appearance ?? {}) },
-      rideSetup: { ...base.profile.rideSetup, ...(rp.rideSetup ?? {}) },
+      rideSetup: { ...base.profile.rideSetup, ...migrateSetup(rp.rideSetup ?? {}) },
     },
     history: Array.isArray(r.history) ? r.history : [],
     xp: typeof r.xp === 'number' ? r.xp : 0,

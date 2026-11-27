@@ -6,7 +6,7 @@ export type RideMode = 'free' | 'group' | 'race';
 export type WindStrength = 'none' | 'light' | 'strong';
 /** direction du vent par rapport à la route au départ */
 export type WindDir = 'head' | 'cross' | 'tail';
-export type RaceLevel = 0.8 | 1 | 1.15;
+import type { Difficulty } from './ai/roster';
 
 export interface RideSetup {
   mode: RideMode;
@@ -18,8 +18,8 @@ export interface RideSetup {
   wait: boolean;
   /** les coureurs se relaient en tête */
   relay: boolean;
-  /** niveau des adversaires en course (fraction de la FTP du joueur) */
-  level: RaceLevel;
+  /** niveau des adversaires en course : facile 70–90 %, égalité 90–110 %, costaud 100–120 % de la FTP du joueur */
+  difficulty: Difficulty;
   /** longueur de la course en trajet libre (km) ; sur un parcours GPX, la course va jusqu'au bout */
   raceKm: number;
   wind: WindStrength;
@@ -29,7 +29,7 @@ export interface RideSetup {
 }
 
 export function defaultSetup(): RideSetup {
-  return { mode: 'free', riders: 6, pace: 0.65, wait: true, relay: true, level: 1, raceKm: 20, wind: 'none', windDir: 'cross', signSprints: true };
+  return { mode: 'free', riders: 6, pace: 0.65, wait: true, relay: true, difficulty: 'equal', raceKm: 20, wind: 'none', windDir: 'cross', signSprints: true };
 }
 
 /** Vitesse du vent (m/s) selon la force choisie. */

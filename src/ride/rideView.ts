@@ -10,13 +10,15 @@
 import * as THREE from 'three';
 import type { View } from '../render/engine';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import { RiderLow } from '../render/riderLow';
 import { RiderModel } from '../render/riderModel';
 import { aiLook } from './ai/looks';
+import { teamById } from '../data/teams';
 import { Peloton, type RankEntry, type PelotonEnv } from './ai/peloton';
 import { defaultSetup, WIND_SPEED, type RideSetup } from './setup';
 import { RaceHud } from '../ui/raceHud';
 import { SignSprints, SPRINT_DISTANCE, SPRINT_XP } from './signSprint';
-import { lookFromProfile } from '../render/look';
+import { lookFromProfile, type RiderLook } from '../render/look';
 import { CameraRig, CAM_MODES, type CamMode } from '../render/cameras';
 import { RouteIndex, emptySample, SURFACES, type Route, type RouteSample } from '../geo/route';
 import type { Track } from '../geo/track';
@@ -47,6 +49,8 @@ export interface RideCallbacks {
   onPauseMenu(): void;
   /** ranking : classement final (course ou groupe), vide en sortie libre */
   onFinish(summary: RideSummary, samples: Sample[], ranking: RankEntry[]): void;
+  /** portrait (« photo de profil ») d'un coureur, rendu depuis son modèle 3D */
+  portrait?(look: RiderLook): string;
 }
 
 /** Tracé provisoire du trajet libre : le point de départ, le temps de charger les routes. */
@@ -104,6 +108,14 @@ export class RideView implements View {
   private peloton: Peloton | null = null;
   private aiModels: RiderModel[] = [];
   private aiLod: number[] = [];
+  /** modèles allégés des coureurs IA, et lequel des deux modèles est affiché */
+  private aiLow: RiderLow[] = [];
+  private aiFull: boolean[] = [];
+  /** temps depuis le dernier changement de modèle, par coureur */
+  private aiSwitchT: number[] = [];
+  /** portraits des coureurs IA (même ordre que peloton.riders) et du joueur */
+  private aiPortraits: string[] = [];
+  private playerPortrait = '';
   private raceHud: RaceHud | null = null;
   private pelEnv: PelotonEnv | null = null;
   /** vent dans le repère du monde (m/s, direction vers laquelle il souffle) */
@@ -273,15 +285,25 @@ export class RideView implements View {
     if (su.mode === 'free') return;
     if (su.mode === 'race') this.raceFinish = this.track.open ? this.dist + su.raceKm * 1000 : this.track.length;
     const p = this.profile;
-    this.peloton = new Peloton(su, p.ftp, p.appearance.style, this.dist, Math.floor(Math.random() * 1e6));
+    this.peloton = new Peloton(su, p.ftp, p.appearance.style, this.dist, Math.floor(Math.random() * 1e6), { playerTeam: p.teamId });
     for (const r of this.peloton.riders) {
       const m = new RiderModel(r.look);
       m.setBlobShadow(!this.q.rideShadows);
       m.crankAngle = r.id * 1.3;
       this.scene.add(m.root);
       this.aiModels.push(m);
+      // version allégée, affichée quand le coureur est loin de la caméra
+      const low = new RiderLow(r.look, m.pose);
+      low.crankAngle = m.crankAngle;
+      m.root.visible = false;
+      this.scene.add(low.root);
+      this.aiLow.push(low);
+      this.aiFull.push(false);
+      this.aiSwitchT.push(1);
       this.aiLod.push(0);
+      this.aiPortraits.push(this.cb.portrait?.(r.look) ?? '');
     }
+    this.playerPortrait = this.cb.portrait?.(lookFromProfile(p)) ?? '';
     this.pelEnv = {
       road: (d) => {
         const s = this.track.sampleAt(d, this.sample2);
@@ -394,7 +416,11 @@ export class RideView implements View {
   /** Classement en direct (vide en sortie libre). */
   private ranking(): RankEntry[] {
     if (!this.peloton) return [];
-    return this.peloton.ranking({ dist: this.dist, v: this.dyn.v, lateral: this.playerLateral, name: this.profile.name || t('rep.you'), finishTime: this.finishTime });
+    const team = teamById(this.profile.teamId);
+    return this.peloton.ranking({
+      dist: this.dist, v: this.dyn.v, lateral: this.playerLateral, name: this.profile.name || t('rep.you'),
+      finishTime: this.finishTime, team: team?.name ?? '', teamColor: this.profile.jerseyColor,
+    }).map((e) => ({ ...e, portrait: e.aiId === null ? this.playerPortrait : this.aiPortraits[e.aiId] ?? '' }));
   }
 
   /** Parcours GPX : reconnaît le revêtement (bitume, gravier, terre) d'après les routes BD TOPO voisines. */
@@ -510,7 +536,7 @@ export class RideView implements View {
    * Pose un avatar sur la route à la distance d. lateral : décalage en mètres vers la gauche
    * (+) ou la droite (−) par rapport à la file normale (droite de la chaussée).
    */
-  private placeModel(model: RiderModel, d: number, lateral: number): void {
+  private placeModel(model: { root: THREE.Object3D; setGrade(g: number): void }, d: number, lateral: number): void {
     const s = this.track.sampleAt(d, this.sample2);
     // on roule à droite de la chaussée (près de l'axe sur un sentier étroit)
     const width = this.path ? this.path.edgeAt(d).width : 6;
@@ -605,18 +631,43 @@ export class RideView implements View {
     }
     if (this.peloton) {
       const cam = this.camera.position;
-      this.peloton.riders.forEach((r, i) => {
-        const m = this.aiModels[i];
+      // Niveau de détail : seuls les voisins immédiats du joueur au classement (juste devant et
+      // juste derrière) sont dessinés en détail ; dès qu'un coureur est à deux places ou plus,
+      // il passe en version allégée. Un changement ne se fait pas plus de 2 fois par seconde,
+      // pour éviter le clignotement quand deux coureurs se doublent sans arrêt.
+      // Exception : un coureur à moins de 6 m de la caméra (premier plan, caméra de poursuite)
+      // reste détaillé, sinon la version allégée se verrait (hystérésis : il repasse en allégé à 8 m).
+      const riders = this.peloton.riders;
+      const ahead = riders.filter((r) => r.dist > this.dist).length;
+      const order = riders.map((_, i) => i).sort((a, b) => riders[b].dist - riders[a].dist);
+      const near = new Set<number>();
+      if (ahead > 0) near.add(order[ahead - 1]);
+      if (ahead < order.length) near.add(order[ahead]);
+      riders.forEach((r, i) => {
+        const m = this.aiModels[i], low = this.aiLow[i];
         // trop loin derrière (hors de l'historique du trajet libre) : on masque
-        m.root.visible = r.dist > this.dist - 700;
-        if (!m.root.visible) return;
-        this.placeModel(m, r.dist, r.lateral);
+        const shown = r.dist > this.dist - 700;
+        this.aiSwitchT[i] += dt;
+        const camD = (this.aiFull[i] ? m : low).root.position.distanceTo(cam);
+        const wantFull = near.has(i) || camD < (this.aiFull[i] ? 8 : 6);
+        if (wantFull !== this.aiFull[i] && this.aiSwitchT[i] > 0.5) {
+          this.aiFull[i] = wantFull;
+          this.aiSwitchT[i] = 0;
+          if (wantFull) m.crankAngle = low.crankAngle; else low.crankAngle = m.crankAngle;
+        }
+        this.placeModel(this.aiFull[i] ? m : low, r.dist, r.lateral);
+        m.root.visible = shown && this.aiFull[i];
+        low.root.visible = shown && !this.aiFull[i];
+        if (!shown) return;
         // cadence : plus élevée quand la puissance monte, roue libre à faible puissance
         const cad = r.power < 25 ? 0 : 78 + Math.min(25, (r.power / r.ftp) * 14);
-        // au-delà de 45 m, les jambes ne sont recalculées qu'une image sur trois
+        if (!this.aiFull[i]) {
+          low.update(dt, moving ? cad : 0);
+          return;
+        }
+        // au-delà de 25 m, les jambes ne sont recalculées qu'une image sur trois
         this.aiLod[i] += dt;
-        const far = m.root.position.distanceTo(cam) > 45;
-        if (!far || this.aiLod[i] > 0.1) {
+        if (m.root.position.distanceTo(cam) < 25 || this.aiLod[i] > 0.1) {
           m.update(this.aiLod[i], moving ? cad : 0, r.dyn.v);
           this.aiLod[i] = 0;
         }
@@ -716,6 +767,6 @@ export class RideView implements View {
     this.landmarks.dispose();
     this.rider.dispose();
     this.raceHud?.dispose();
-    for (const m of [...this.aiModels, ...this.preview.map((p) => p.model)]) m.dispose();
+    for (const m of [...this.aiModels, ...this.aiLow, ...this.preview.map((p) => p.model)]) m.dispose();
   }
 }

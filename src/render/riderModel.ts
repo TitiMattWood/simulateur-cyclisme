@@ -750,6 +750,28 @@ function mergeStatic(group: THREE.Object3D, keepApart: Set<THREE.Object3D>): voi
 
 // ---------------------------------------------------------------------------
 
+/** Points clés d'un avatar (repère du groupe body : x vers l'avant, y vers le haut). */
+export interface RiderPose {
+  hip: THREE.Vector3;
+  shoulder: THREE.Vector3;
+  head: THREE.Vector3;
+  headR: number;
+  /** milieu des deux mains (z = 0) */
+  hand: THREE.Vector3;
+  /** boîtier de pédalier */
+  bb: THREE.Vector3;
+  /** rayon des roues, empattement */
+  R: number;
+  wheelbase: number;
+  thigh: number;
+  shin: number;
+  /** échelle de taille et de corpulence */
+  s: number;
+  limb: number;
+}
+
+export { CRANK };
+
 export class RiderModel {
   readonly root = new THREE.Group();
   /** groupe incliné selon la pente (le vélo suit la route) */
@@ -760,6 +782,8 @@ export class RiderModel {
   readonly eye = new THREE.Vector3();
   readonly chest = new THREE.Vector3();
   crankAngle = 0;
+  /** points clés du cycliste et du vélo (repère du groupe body) */
+  pose!: RiderPose;
 
   private wheels: THREE.Group[] = [];
   private crank = new THREE.Group();
@@ -1584,6 +1608,12 @@ export class RiderModel {
     // repères pour les caméras
     this.eye.copy(headC).add(V(0.09 * hs, 0.05 * hs));
     this.chest.copy(shoulder).add(V(0.05 * s, -0.06 * s));
+    // points clés pour le modèle allégé des coureurs lointains (render/riderLow.ts)
+    this.pose = {
+      hip: this.hip.clone(), shoulder: shoulder.clone(), head: headC.clone(), headR: 0.11 * hs,
+      hand: hands.length ? hands.reduce((a, h) => a.add(h), V(0, 0)).multiplyScalar(1 / hands.length).setZ(0) : shoulder.clone(),
+      bb: bb.clone(), R, wheelbase, thigh: this.thighLen, shin: this.shinLen, s, limb: wm,
+    };
 
     // Ombre portée simplifiée (disque sombre au sol), utile en extérieur.
     const mShadow = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false });
