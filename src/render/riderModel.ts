@@ -105,8 +105,33 @@ const G = {
   /** molette de serrage */
   dial: keep(new THREE.CylinderGeometry(1, 1, 1, 16)),
   /** verre de lunettes enveloppant (portion de cylindre ouvert, centré vers +X) */
-  lens: keep(new THREE.CylinderGeometry(1, 1, 1, 20, 1, true, Math.PI / 2 - 1.25, 2.5)),
+  lens: keep(lensGeometry()),
 };
+
+/**
+ * Verre de lunettes de sport enveloppant : portion de cylindre (centrée vers +X) dont le bas
+ * dessine deux verres arrondis avec un pont pour le nez au milieu, et qui s'affine vers les
+ * branches. Hauteur 1 (de −0,5 à +0,5), rayon 1.
+ */
+function lensGeometry(): THREE.BufferGeometry {
+  const span = 2.5, start = Math.PI / 2 - 1.25;
+  const g = new THREE.CylinderGeometry(1, 1, 1, 40, 4, true, start, span);
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    // angle depuis l'avant (0 = devant le nez, ±1,25 = au niveau des tempes)
+    const a = Math.atan2(z, x);
+    const u = Math.abs(a) / 1.25;
+    // bord bas : remonté au pont du nez, arrondi sous chaque verre, remonté vers les branches
+    const bottom = -0.5 + 0.42 * Math.exp(-(a * a) / 0.02) + 0.35 * Math.pow(u, 3);
+    // bord haut : légèrement abaissé vers les branches
+    const top = 0.5 - 0.18 * Math.pow(u, 2);
+    const t = y + 0.5;
+    pos.setY(i, bottom + (top - bottom) * t);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 
 /**
  * Prisme de hauteur 1 (axe Y) dont la section est donnée par des points [x, z] tournant
@@ -484,13 +509,19 @@ class LimbPath {
   private p2 = new THREE.Vector3();
   private tmp = new THREE.Vector3();
 
-  set(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): this {
+  /**
+   * blendR : rayon approximatif du membre à l'articulation. L'arrondi doit être plus large que
+   * l'épaisseur du membre, sinon l'intérieur du pli s'écrase en angle (genou, coude « cassés »).
+   */
+  set(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, blendR = 0.035): this {
     this.a.copy(a);
     this.b.copy(b);
     this.c.copy(c);
     this.l1 = a.distanceTo(b) || 1e-4;
     this.l2 = b.distanceTo(c) || 1e-4;
-    this.blend = Math.min(0.06, 0.35 * Math.min(this.l1, this.l2));
+    // plus le pli est fermé, plus l'arrondi doit être large
+    const bend = 1 - new THREE.Vector3().subVectors(a, b).normalize().dot(new THREE.Vector3().subVectors(c, b).normalize()) * -1;
+    this.blend = Math.min(0.4 * Math.min(this.l1, this.l2), blendR * (1.2 + 1.3 * Math.min(1, bend)));
     this.p0.copy(b).lerp(a, this.blend / this.l1);
     this.p2.copy(b).lerp(c, this.blend / this.l2);
     return this;
@@ -498,6 +529,11 @@ class LimbPath {
 
   get length(): number {
     return this.l1 + this.l2;
+  }
+
+  /** demi-longueur de l'arrondi de l'articulation (m) */
+  get joint(): number {
+    return this.blend;
   }
 
   /** Point à la distance d le long du membre. */
@@ -521,6 +557,8 @@ class LimbPath {
 
 /** Surface tubulaire dont les anneaux sont recalculés à chaque image. */
 class FlexTube {
+  /** table de répartition des anneaux (partagée, recalculée à chaque mise à jour) */
+  private static cum = new Float64Array(49);
   readonly mesh: THREE.Mesh;
   private pos: THREE.BufferAttribute;
   private c = new THREE.Vector3();
@@ -559,8 +597,21 @@ class FlexTube {
    */
   update(path: LimbPath, d0: number, d1: number, radius: (d: number) => number, shift: (d: number) => number, scale = 1): void {
     const arr = this.pos.array as Float32Array;
+    // Anneaux resserrés autour de l'articulation (densité ×3,5 dans le pli) : la courbure du
+    // genou ou du coude est décrite finement, même en style facetté.
+    const N = 48, cum = FlexTube.cum;
+    const jc = path.l1, jw = Math.max(0.02, path.joint * 1.4);
+    cum[0] = 0;
+    for (let k = 1; k <= N; k++) {
+      const d = d0 + ((d1 - d0) * (k - 0.5)) / N;
+      cum[k] = cum[k - 1] + 1 + 2.5 * Math.exp(-((d - jc) * (d - jc)) / (jw * jw));
+    }
+    let k = 0;
     for (let i = 0; i <= this.rings; i++) {
-      const d = d0 + ((d1 - d0) * i) / this.rings;
+      const target = (cum[N] * i) / this.rings;
+      while (k < N - 1 && cum[k + 1] < target) k++;
+      const f = (target - cum[k]) / Math.max(1e-9, cum[k + 1] - cum[k]);
+      const d = d0 + ((d1 - d0) * (k + Math.min(1, Math.max(0, f)))) / N;
       path.frame(d, this.c, this.f);
       const r = radius(d) * scale;
       const sh = shift(d);
@@ -1859,7 +1910,7 @@ export class RiderModel {
     // lunettes enveloppantes
     if (look.glasses && look.helmetType !== 'tt') {
       const glass = new THREE.Mesh(G.lens, mLens);
-      glass.scale.set(0.094 * hs, 0.036 * hs, 0.094 * hs);
+      glass.scale.set(0.096 * hs, 0.042 * hs, 0.092 * hs);
       glass.position.copy(headC).add(V(0.013 * hs, 0.014 * hs));
       helmetParts.push(glass);
       for (const side of [-1, 1]) {
@@ -1879,14 +1930,15 @@ export class RiderModel {
       const hand = hands[i].clone();
       const elbow = elbows[i] ?? solve2(sh, hand, upperArm, foreArm, -1).setZ(side * 0.235 * s);
       const ur = 0.046 * s * wm, fr = 0.038 * s * wm;
-      this.body.add(blob(mShoulder, sh, 0.062 * s * wm, 0.06 * s * wm, 0.058 * s * wm)); // épaule
-      const path = new LimbPath().set(sh, elbow, hand);
+      // épaule : arrondi discret, rentré dans le buste (plus d'« épaulette »)
+      this.body.add(blob(mShoulder, sh.clone().add(V(0, -0.004 * s, -side * 0.012 * s)), 0.052 * s * wm, 0.05 * s * wm, 0.048 * s * wm));
+      const path = new LimbPath().set(sh, elbow, hand, 0.042 * s * wm);
       const L1 = path.l1, L = path.length;
       const radius = (d: number) => (d < L1 ? ur * rAt(UPPER_ARM, d / L1) : fr * rAt(FOREARM, (d - L1) / path.l2));
       const shift = (d: number) => (d < L1 ? 0.12 * ur * bump(d / L1, 0.45, 0.25) : 0);
-      const skin = new FlexTube(mSkin, seg(22, 10), seg(12, 6));
+      const skin = new FlexTube(mSkin, seg(28, 16), seg(14, 7));
       skin.update(path, 0, L - 0.01, radius, shift);
-      const sleeve = new FlexTube(mSleeveCuff, seg(12, 6), seg(12, 6));
+      const sleeve = new FlexTube(mSleeveCuff, seg(14, 8), seg(14, 7));
       sleeve.update(path, 0, longSleeves ? L - 0.03 : 0.55 * L1, radius, shift, 1.1);
       this.body.add(skin.mesh, sleeve.mesh);
       // main (gant) et doigts
@@ -1901,9 +1953,9 @@ export class RiderModel {
     mShorts.side = THREE.DoubleSide;
     mSock.side = THREE.DoubleSide;
     for (const side of [-1, 1]) {
-      const skin = new FlexTube(mSkin, seg(34, 14), seg(16, 7));
-      const shorts = new FlexTube(mShorts, seg(14, 6), seg(16, 7));
-      const sock = new FlexTube(mSock, seg(12, 5), seg(16, 7));
+      const skin = new FlexTube(mSkin, seg(40, 22), seg(16, 8));
+      const shorts = new FlexTube(mShorts, seg(16, 9), seg(16, 8));
+      const sock = new FlexTube(mSock, seg(14, 7), seg(16, 8));
       const overshoe = look.overshoes ? new FlexTube(mShoe, 4, seg(16, 7)) : null;
       const ankle = blob(look.overshoes ? mShoe : mSock, V(0, 0), 1, 1, 1);
       // chaussure : repère local centré sur l'axe de la pédale
@@ -2005,7 +2057,7 @@ export class RiderModel {
       const hip = V(this.hip.x, this.hip.y, leg.side * 0.095 * s * wm);
       const knee = solve2(hip, ankle, this.thighLen, this.shinLen, 1);
       knee.z = leg.side * 0.105 * s * wm;
-      const path = leg.path.set(hip, knee, ankle);
+      const path = leg.path.set(hip, knee, ankle, 0.062 * s * wm);
       const L1 = path.l1, L2 = path.l2, L = path.length;
       const Rt = 0.074 * s * wm, Rc = 0.057 * s * wm;
       // rayon anatomique : cuisse qui s'affine, genou, mollet bombé, cheville fine
