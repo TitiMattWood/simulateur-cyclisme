@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { WHEELS, type FrameId } from '../physics/equipment';
+import { OUTLINES, type FrameOutline, type Pt } from './frameOutlines';
 import { LENS, type RiderLook } from './look';
 
 export type { RiderLook } from './look';
@@ -753,6 +754,61 @@ function mergeStatic(group: THREE.Object3D, keepApart: Set<THREE.Object3D>): voi
 }
 
 // ---------------------------------------------------------------------------
+// Cadre « relevé sur photo » : contours de profil extrudés avec des bords arrondis.
+
+function extrudeOutline(pts: THREE.Vector3[], hole: THREE.Vector3[] | null, width: number, bevel: number): THREE.ExtrudeGeometry {
+  const shape = new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, p.y)));
+  if (hole) shape.holes.push(new THREE.Path(hole.map((p) => new THREE.Vector2(p.x, p.y))));
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.001, width - 2 * bevel), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.9,
+    // le biseau ne doit pas élargir la silhouette : on le prend vers l'intérieur du contour
+    bevelOffset: -bevel * 0.9, bevelSegments: 3, curveSegments: 4,
+  });
+  g.translate(0, 0, -(width - 2 * bevel) / 2);
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Décale en z une pièce latérale (haubans, bases) : écartée de zFar au niveau de la roue,
+ * elle se resserre jusqu'à zNear au point de jonction avec le cadre (x de xFar à xNear).
+ */
+function converge(g: THREE.BufferGeometry, xFar: number, xNear: number, zFar: number, zNear: number): THREE.BufferGeometry {
+  const pos = g.getAttribute('position');
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.min(1, Math.max(0, (pos.getX(i) - xFar) / (xNear - xFar)));
+    pos.setZ(i, pos.getZ(i) + zFar + (zNear - zFar) * t);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildOutlineFrame(
+  bike: THREE.Group, ol: FrameOutline, P: (q: Pt) => THREE.Vector3,
+  mFrame: THREE.Material, mFork: THREE.Material, headBot: THREE.Vector3,
+): void {
+  const pts = (a: Pt[]) => a.map(P);
+  // triangle avant d'un seul tenant (tubes fondus les uns dans les autres, comme le carbone moulé)
+  bike.add(new THREE.Mesh(extrudeOutline(pts(ol.front3), pts(ol.hole), 0.042, 0.015), mFrame));
+  const rearX = 0, bbX = P(ol.bb).x;
+  for (const side of [-1, 1]) {
+    // haubans : de la patte (écartés) vers le tube de selle (resserrés)
+    const ss = pts(ol.seatstay);
+    const ssJoin = Math.max(...ss.map((p) => p.x));
+    bike.add(new THREE.Mesh(converge(extrudeOutline(ss, null, 0.016, 0.006), rearX, ssJoin, side * 0.064, side * 0.024), mFrame));
+    // bases : de la patte vers le boîtier de pédalier
+    bike.add(new THREE.Mesh(converge(extrudeOutline(pts(ol.chainstay), null, 0.02, 0.008), rearX, bbX, side * 0.064, side * 0.034), mFrame));
+    // fourreaux de fourche : écartés à l'axe, resserrés sous la douille
+    const fk = pts(ol.fork);
+    const top = Math.min(...fk.map((p) => p.x)), axle = Math.max(...fk.map((p) => p.x));
+    bike.add(new THREE.Mesh(converge(extrudeOutline(fk, null, 0.02, 0.008), axle, top, side * 0.055, side * 0.03), mFork));
+  }
+  // té de fourche (relie les deux fourreaux sous la douille) et boîtier de pédalier
+  bike.add(blob(mFork, headBot.clone().add(new THREE.Vector3(0.005, -0.012, 0)), 0.03, 0.022, 0.05));
+  bike.add(blob(mFrame, P(ol.bb), 0.032, 0.032, 0.045));
+}
+
+// ---------------------------------------------------------------------------
 
 /** Points clés d'un avatar (repère du groupe body : x vers l'avant, y vers le haut). */
 export interface RiderPose {
@@ -887,11 +943,14 @@ export class RiderModel {
     const bike = new THREE.Group();
     const R = geo.R;
     const rear = V(0, R);
-    const bb = (this.bb = V(geo.bb[0], geo.bb[1]));
-    const seatTop = V(...geo.seatTop);
-    let headTop = V(...geo.headTop), headBot = V(...geo.headBot);
-    let front = V(geo.wheelbase, R);
-    if (!geo.suspension) {
+    // Cadre relevé sur photo : points clés et silhouette en mètres (axe arrière à l'origine).
+    const ol = (OUTLINES as Partial<Record<FrameId, FrameOutline>>)[look.frame];
+    const P = (q: Pt) => V((q[0] - ol!.rear[0]) * ol!.kx, R + (ol!.rear[1] - q[1]) * ol!.ky);
+    const bb = (this.bb = ol ? P(ol.bb) : V(geo.bb[0], geo.bb[1]));
+    const seatTop = ol ? P(ol.seatTop) : V(...geo.seatTop);
+    let headTop = ol ? P(ol.headTop) : V(...geo.headTop), headBot = ol ? P(ol.headBot) : V(...geo.headBot);
+    let front = ol ? V(P(ol.front).x, R) : V(geo.wheelbase, R);
+    if (!geo.suspension && !ol) {
       // Fourche de longueur réaliste (axe → té) : la roue garde du jeu sous le tube diagonal.
       // On garde l'angle et la longueur de douille, on remonte la douille, la roue avance d'autant.
       const axis = new THREE.Vector3().subVectors(headTop, headBot);
@@ -928,6 +987,8 @@ export class RiderModel {
     };
     const ttDepth = Math.min(D, 1.4);
     const dtEnd = headBot.clone().add(V(-0.01, -0.01));
+    if (ol) buildOutlineFrame(bike, ol, P, mFrame, look.forkColor ? (look.finish === 'matte' ? lam(look.forkColor) : shiny(look.forkColor, 80, '#777777')) : mFrame, headBot);
+    else {
     // triangle avant
     if (geo.shape === 'foil') {
       // Foil : tube de selle qui épouse la roue (léger arc vers l'avant), tube diagonal qui
@@ -1071,6 +1132,8 @@ export class RiderModel {
         place(m, V(front.x - 0.004, front.y, z * 0.95), V(crown.x, crown.y, z * 0.75), 1, 1);
         bike.add(m);
       }
+    }
+
     }
 
     // ----- Position du cycliste : selle, hanche, buste, mains.
