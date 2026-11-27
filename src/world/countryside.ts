@@ -61,10 +61,13 @@ export function buildCountryside(inp: CountrysideInput): Countryside {
   // Grille des cases bâties : un point est « en ville » si une case voisine contient un bâtiment.
   const built = new Set<number>();
   const cellKey = (cx: number, cz: number) => (cx + 30000) * 60000 + (cz + 30000);
+  // Toutes les cases couvertes par l'emprise d'un bâtiment (une barre d'immeubles fait 100 m et plus).
   for (const f of inp.buildings) {
-    const ring = geoToPolys(f.geometry, inp.proj)[0]?.outer;
-    if (!ring?.length) continue;
-    built.add(cellKey(Math.floor(ring[0][0] / URBAN_CELL), Math.floor(ring[0][1] / URBAN_CELL)));
+    for (const poly of geoToPolys(f.geometry, inp.proj)) {
+      for (let cx = Math.floor(poly.minX / URBAN_CELL); cx <= Math.floor(poly.maxX / URBAN_CELL); cx++) {
+        for (let cz = Math.floor(poly.minZ / URBAN_CELL); cz <= Math.floor(poly.maxZ / URBAN_CELL); cz++) built.add(cellKey(cx, cz));
+      }
+    }
   }
   const urban = (x: number, z: number) => {
     const cx = Math.floor(x / URBAN_CELL), cz = Math.floor(z / URBAN_CELL);

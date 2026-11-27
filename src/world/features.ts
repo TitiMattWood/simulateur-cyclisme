@@ -453,7 +453,7 @@ export function buildVegetation(
   const density = estimate > budget ? Math.sqrt(estimate / Math.max(1, budget)) : 1;
   const r = rng(seed);
   // les arbres de bord de route ne prennent pas plus de la moitié du budget
-  const list: TreePlacement[] = extra.slice(0, Math.floor(maxTrees * 0.5));
+  const list: TreePlacement[] = (avoid ? extra.filter((t) => !avoid(t.x, t.z)) : extra).slice(0, Math.floor(maxTrees * 0.5));
   for (const { poly, rule } of zones) {
     const sp = rule.spacing * density;
     const ix0 = Math.max(poly.minX, bounds.x0), ix1 = Math.min(poly.maxX, bounds.x1);

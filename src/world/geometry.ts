@@ -187,6 +187,42 @@ export function hashString(s: string): number {
 }
 
 /**
+ * Index spatial de polygones (emprises de bâtiments) : « ce point est-il dans un bâtiment,
+ * ou à moins de `margin` mètres d'un mur ? » (test approché sur 5 points).
+ */
+export class PolyIndex {
+  private readonly grid = new Map<number, Poly[]>();
+
+  constructor(polys: Poly[], private readonly cell = 30) {
+    for (const p of polys) {
+      for (let cx = Math.floor(p.minX / cell); cx <= Math.floor(p.maxX / cell); cx++) {
+        for (let cz = Math.floor(p.minZ / cell); cz <= Math.floor(p.maxZ / cell); cz++) {
+          const k = this.key(cx, cz);
+          let l = this.grid.get(k);
+          if (!l) this.grid.set(k, (l = []));
+          l.push(p);
+        }
+      }
+    }
+  }
+
+  private key(cx: number, cz: number): number {
+    return (cx + 50000) * 100000 + (cz + 50000);
+  }
+
+  private inside(x: number, z: number): boolean {
+    const l = this.grid.get(this.key(Math.floor(x / this.cell), Math.floor(z / this.cell)));
+    return !!l?.some((p) => x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ && pointInPoly(x, z, p));
+  }
+
+  hits(x: number, z: number, margin = 0): boolean {
+    if (this.inside(x, z)) return true;
+    if (margin <= 0) return false;
+    return this.inside(x + margin, z) || this.inside(x - margin, z) || this.inside(x, z + margin) || this.inside(x, z - margin);
+  }
+}
+
+/**
  * Index spatial de segments (grille de hachage) : retrouve vite le segment le plus proche
  * d'un point. Sert à aplanir le terrain sous les routes, écarter les arbres de la chaussée,
  * reconnaître le revêtement sous un tracé GPX, etc.

@@ -15,7 +15,7 @@
  */
 import { G } from '../config';
 import {
-  FRAMES, WHEELS, SURFACE_CRR, KIT_GAINS, riderCdA,
+  FRAMES, SURFACE_CRR, KIT_GAINS, riderCdA, wheelEffect,
   type FrameId, type WheelId, type SurfaceId, type Kit,
 } from './equipment';
 
@@ -36,13 +36,15 @@ export interface PhysicsParams {
   /** CdA hors aspiration (m²) */
   cda: number;
   frame: FrameId;
+  /** multiplicateur du Crr selon le revêtement, dû à l'association pneu/jante */
+  roll?: Record<SurfaceId, number>;
   /** rendement de la transmission (chaîne, roulements) */
   drivetrain: number;
 }
 
 export function buildParams(s: RiderSetup): PhysicsParams {
   const frame = FRAMES[s.frame];
-  const wheels = WHEELS[s.wheels];
+  const wheels = wheelEffect(s.frame, s.wheels);
   let cda = riderCdA(s.heightCm, s.weightKg) * frame.cdaFactor + wheels.cdaDelta;
   if (s.kit.aeroHelmet) cda += KIT_GAINS.aeroHelmet;
   if (s.kit.highSocks) cda += KIT_GAINS.highSocks;
@@ -54,13 +56,14 @@ export function buildParams(s: RiderSetup): PhysicsParams {
     inertiaMass: s.frame === 'mtb' ? 2.4 : s.frame === 'gravel' ? 2.0 : 1.6 + wheels.massDelta * 0.6,
     cda,
     frame: s.frame,
+    roll: wheels.roll,
     drivetrain: 0.976,
   };
 }
 
 /** Crr effectif pour un cadre et un revêtement. */
-export function crrFor(frame: FrameId, surface: SurfaceId): number {
-  return SURFACE_CRR[surface] * FRAMES[frame].crrFactor[surface];
+export function crrFor(frame: FrameId, surface: SurfaceId, roll?: Record<SurfaceId, number>): number {
+  return SURFACE_CRR[surface] * FRAMES[frame].crrFactor[surface] * (roll?.[surface] ?? 1);
 }
 
 /** Masse volumique de l'air (kg/m³) selon l'altitude et la température. */

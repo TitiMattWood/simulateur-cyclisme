@@ -850,7 +850,7 @@ export class RiderModel {
     const TIRE_COLORS: Record<string, string> = { blue: '#1f5fd0', red: '#c8202a', white: '#e9e9e9', yellow: '#f2c21b', green: '#2e9e4f' };
     const mTireColor = TIRE_COLORS[look.tireWall] ? lam(TIRE_COLORS[look.tireWall], { roughness: 0.7 }) : null;
     // roues aluminium (jante basse ou 30 mm) : jante métal, rayons argentés, sans décor
-    const alloy = look.wheels === 'alu' || look.wheels === 'alu30';
+    const alloy = look.wheels === 'alu' || look.wheels === 'alu30' || look.wheels === 'g25';
     const mRim = alloy ? shiny('#3a3d41', 50) : shiny('#1d1e20', 70, '#666666');
     const mDecalW = lam('#d9dde0', { side: THREE.DoubleSide });
     const mTape = lam(look.barTape);
@@ -1213,10 +1213,13 @@ export class RiderModel {
     }
 
     // ----- Roues
-    const rimDepth = WHEELS[look.wheels].rimDepth / 1000;
+    const wspec = WHEELS[look.wheels] ?? WHEELS.c40;
     const tireR = geo.tire;
     for (const c of [rear, front]) {
       const isRear = c === rear;
+      // hauteur de jante propre à chaque roue (profils avant/arrière différents) ; roue pleine à l'arrière
+      const rimDepth = (isRear ? wspec.rimDepthRear ?? wspec.rimDepth : wspec.rimDepth) / 1000;
+      const disc = isRear && !!wspec.rearDisc;
       const w = new THREE.Group();
       w.position.copy(c);
       bike.add(w);
@@ -1245,8 +1248,22 @@ export class RiderModel {
         w.add(knobs);
       }
       const rimOut = R - 2 * tireR + 0.003;
-      const rimIn = rimOut - Math.max(0.02, rimDepth);
-      for (const z of [-0.0095, 0.0095]) {
+      const rimIn = disc ? 0.03 : rimOut - Math.max(0.02, rimDepth);
+      if (disc) {
+        // lenticulaire : deux flancs légèrement bombés, du moyeu (épais) à la jante (fine)
+        const prof: THREE.Vector2[] = [];
+        for (let k = 0; k <= 8; k++) {
+          const r = 0.03 + (rimOut - 0.03) * (k / 8);
+          prof.push(new THREE.Vector2(r, 0.026 - 0.0165 * Math.pow(k / 8, 1.4)));
+        }
+        for (const sgn of [1, -1]) {
+          const lens = new THREE.Mesh(new THREE.LatheGeometry(prof, seg(64, 24)), mRim);
+          lens.rotation.x = sgn * Math.PI / 2;
+          (lens.material as THREE.Material).side = THREE.DoubleSide;
+          w.add(lens);
+        }
+      }
+      for (const z of disc ? [] : [-0.0095, 0.0095]) {
         const ring = new THREE.Mesh(new THREE.RingGeometry(rimIn, rimOut, 64), mRim);
         ring.position.z = z;
         (ring.material as THREE.Material).side = THREE.DoubleSide;
@@ -1260,8 +1277,8 @@ export class RiderModel {
           }
         }
       }
-      // rayons (lignes fines) : alternés gauche/droite
-      const nSpokes = alloy ? 28 : 24;
+      // rayons (lignes fines) : alternés gauche/droite (aucun sur une roue pleine)
+      const nSpokes = disc ? 0 : alloy ? 28 : 24;
       const pts: number[] = [];
       for (let k = 0; k < nSpokes; k++) {
         const a = (k / nSpokes) * Math.PI * 2;

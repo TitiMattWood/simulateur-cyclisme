@@ -20,7 +20,7 @@ import { fetchDemGrid, fetchOrtho, fetchWfs, type BBox, type GeoFeature } from '
 import { buildTerrain, flattenUnderRoute, flattenUnderRoads, ROAD_HALF_WIDTH } from './terrain';
 import { buildBuildings, buildVegetation, buildStreets } from './features';
 import { buildCountryside } from './countryside';
-import { geoToPolys, geoToLines, sampleGrid, SegmentIndex, type HeightGrid } from './geometry';
+import { geoToPolys, geoToLines, sampleGrid, SegmentIndex, PolyIndex, type HeightGrid } from './geometry';
 import { ROAD_CLASSES, ROAD_PROPS, roadWidth } from './roads';
 
 type Level = 'near' | 'far';
@@ -298,7 +298,10 @@ export class WorldStreamer {
       }
       if (rd.lamps.length) group.add(streetLamps(rd.lamps));
       const ri = roads;
+      // emprises des bâtiments : aucun arbre ne doit pousser dedans (ni contre un mur)
+      const houses = new PolyIndex(bat.flatMap((f) => geoToPolys(f.geometry, proj)));
       const avoid = (x: number, z: number) => {
+        if (houses.hits(x, z, 2.5)) return true;
         const hit = ri?.nearest(x, z, 10, (d) => d.halfW);
         if (hit && hit.dist < hit.data.halfW + 2.5) return true;
         return !!this.index?.nearest(x, z, ROAD_HALF_WIDTH + 4);

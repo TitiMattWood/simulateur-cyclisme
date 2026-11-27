@@ -585,7 +585,7 @@ export class RideView implements View {
         grade: s.grade,
         headwind: wd.head,
         rho: airDensity(s.ele, 15),
-        crr: crrFor(p.frame, s.surface),
+        crr: crrFor(this.params.frame, s.surface, this.params.roll),
         draft: this.playerDraft,
       };
       const v = this.dyn.step(dt, this.live.power, conds, s.vmax);

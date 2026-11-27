@@ -31,7 +31,7 @@ import franceMap from '../data/france-map.json';
 import { APP_NAME, QUALITY, type QualityLevel } from '../config';
 import { t, setLang, type I18nKey, type Lang } from '../i18n';
 import { escapeHtml, fmtKm, fmtNum, fmtTime } from './format';
-import type { FrameId, WheelId } from '../physics/equipment';
+import { WHEELS, WHEEL_ORDER, wheelAllowed, defaultWheelFor, wheelEffect, type FrameId, type WheelId } from '../physics/equipment';
 import { CHAINRINGS, CASSETTES, TIRES, type TireId } from '../physics/gears';
 import type { RideMode, RideSetup } from '../ride/setup';
 import type { RankEntry } from '../ride/ai/peloton';
@@ -520,8 +520,10 @@ export class App {
     const bike = `
       <div class="grid2">
         ${sel('pf-frame', 'pf.frame', ['climb', 'aero', 'gravel', 'tt', 'mtb'] as const, p.frame, tr('frame'))}
-        ${sel('pf-wheels', 'pf.wheels', ['alu', 'alu30', 'c30', 'c40', 'c45', 'c50', 'c55', 'c88'] as const, p.wheels, tr('wheel'))}
+        <label>${t('pf.wheels')}<select id="pf-wheels">${WHEEL_ORDER.map((w) =>
+          `<option value="${w}" ${w === p.wheels ? 'selected' : ''} ${wheelAllowed(p.frame, w) ? '' : 'disabled'}>${escapeHtml(`${t(`wheel.${w}` as I18nKey)} · ${fmtNum(WHEELS[w].grams, 0)} g`)}</option>`).join('')}</select></label>
       </div>
+      <div id="pf-wheelinfo" class="wheel-info">${wheelInfoHtml(p.frame, p.wheels)}</div>
       <div class="grid3">
         ${color('pf-fc', 'pf.frameColor', a.frameColor)}
         ${color('pf-fc2', 'pf.frameColor2', a.frameColor2)}
@@ -655,7 +657,9 @@ export class App {
       teamId: val('pf-team'),
       hrMax: clamp(parseFloat(val('pf-hrmax')), 100, 230, p.hrMax),
       frame: val('pf-frame') as FrameId,
-      wheels: val('pf-wheels') as WheelId,
+      // roues incompatibles avec le cadre (lenticulaire hors CLM, roues route sur un VTT) : on remplace
+      wheels: wheelAllowed(val('pf-frame') as FrameId, val('pf-wheels') as WheelId)
+        ? val('pf-wheels') as WheelId : defaultWheelFor(val('pf-frame') as FrameId),
       // le casque aéro/CLM et les chaussettes hautes comptent aussi dans la physique
       kit: { aeroHelmet: appearance.helmetType !== 'road', highSocks: appearance.sockHeight === 'high', overshoes: chk('pf-over') },
       jerseyColor: val('pf-j1'),
@@ -715,6 +719,11 @@ export class App {
       pending = requestAnimationFrame(() => {
         pending = 0;
         const draft = this.readProfileForm();
+        // roues proposées selon le cadre choisi, et leurs effets sur ce cadre
+        const ws = $<HTMLSelectElement>(this.ui, '#pf-wheels');
+        ws.querySelectorAll('option').forEach((o) => { o.disabled = !wheelAllowed(draft.frame, o.value as WheelId); });
+        ws.value = draft.wheels;
+        $(this.ui, '#pf-wheelinfo').innerHTML = wheelInfoHtml(draft.frame, draft.wheels);
         this.home.setLook(lookFromProfile(draft));
         const params = buildParams({ weightKg: draft.weightKg, heightCm: draft.heightCm, frame: draft.frame, wheels: draft.wheels, kit: draft.kit });
         $(this.ui, '#pf-physics').textContent = t('pf.physics', { mass: fmtNum(params.mass, 1), cda: fmtNum(params.cda, 3) });
@@ -985,6 +994,16 @@ export class App {
   }
 }
 
+/** Fiche de la paire de roues choisie et gains marginaux de l'association avec le cadre. */
+function wheelInfoHtml(frame: FrameId, id: WheelId): string {
+  const w = WHEELS[id];
+  const depth = w.rearDisc ? t('pf.wheelDisc', { front: w.rimDepth })
+    : w.rimDepthRear ? `${w.rimDepth}/${w.rimDepthRear} mm` : `${w.rimDepth} mm`;
+  const fx = wheelEffect(frame, id);
+  const notes = fx.notes.map((n) => `<li class="${n === 'integration' || n === 'tt-disc' || n === 'gravel-wide-rim' ? 'pos' : 'neg'}">${t(`wheelnote.${n}` as I18nKey)}</li>`).join('');
+  return `<small>${t('pf.wheelSpec', { grams: fmtNum(w.grams, 0), depth, inner: fmtNum(w.innerWidth, 1) })}</small>${notes ? `<ul>${notes}</ul>` : ''}`;
+}
+
 /**
  * « Effet sur la route » : vitesse gagnée ou perdue à 250 W pour chaque choix de matériel,
  * sur le plat et dans une côte à 8 %, par rapport à un vélo route en alu sans accessoire aéro.
@@ -992,10 +1011,12 @@ export class App {
 function roadEffectHtml(p: Profile): string {
   const base: RiderSetup = { weightKg: p.weightKg, heightCm: p.heightCm, frame: 'climb', wheels: 'alu', kit: { aeroHelmet: false, highSocks: false, overshoes: false } };
   const speed = (su: RiderSetup, grade: number) =>
-    steadySpeed(250, { grade, headwind: 0, rho: airDensity(0), crr: crrFor(su.frame, 'asphalt'), draft: 1 }, buildParams(su)) * 3.6;
-  const rows: Array<[I18nKey, RiderSetup]> = [
+    steadySpeed(250, { grade, headwind: 0, rho: airDensity(0), crr: crrFor(su.frame, 'asphalt', buildParams(su).roll), draft: 1 }, buildParams(su)) * 3.6;
+  // les roues sont jugées sur le cadre choisi (leurs gains dépendent de l'association)
+  const onFrame: RiderSetup = { ...base, frame: p.frame };
+  const rows: Array<[I18nKey, RiderSetup, RiderSetup?]> = [
     ['effect.frame', { ...base, frame: p.frame }],
-    ['effect.wheels', { ...base, wheels: p.wheels }],
+    ['effect.wheels', { ...onFrame, wheels: p.wheels }, onFrame],
     ['effect.helmet', { ...base, kit: { ...base.kit, aeroHelmet: p.kit.aeroHelmet } }],
     ['effect.socks', { ...base, kit: { ...base.kit, highSocks: p.kit.highSocks } }],
     ['effect.overshoes', { ...base, kit: { ...base.kit, overshoes: p.kit.overshoes } }],
@@ -1008,7 +1029,8 @@ function roadEffectHtml(p: Profile): string {
   };
   return `
     <table><thead><tr><th></th><th>${t('effect.flat')}</th><th>${t('effect.climb')}</th></tr></thead><tbody>
-      ${rows.map(([k, su]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${cell(speed(su, 0) - f0)}${cell(speed(su, 0.08) - c0)}</tr>`).join('')}
+      ${rows.map(([k, su, ref]) => `<tr class="${k === 'effect.total' ? 'total' : ''}"><th>${t(k)}</th>${
+        cell(speed(su, 0) - (ref ? speed(ref, 0) : f0))}${cell(speed(su, 0.08) - (ref ? speed(ref, 0.08) : c0))}</tr>`).join('')}
     </tbody></table>
     <small>${t('effect.hint')} (km/h)</small>`;
 }
